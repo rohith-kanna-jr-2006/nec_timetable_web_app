@@ -8,6 +8,7 @@ import {
   calculateTimetableMetrics,
 } from '../../services/timetableService';
 import { getFacultyList } from '../../services/facultyService';
+import { getAcademicContexts } from '../../services/academicContextService';
 import { WEEK_DAYS, PERIOD_TIMINGS } from '../../constants/schedule';
 
 import PageHeader from '../../components/common/PageHeader';
@@ -20,7 +21,7 @@ import ErrorState from '../../components/common/ErrorState';
 
 export default function WeeklyTimetablePage() {
   const { user } = useAuth();
-  const { addToast } = useToast();
+  const { showToast } = useToast();
 
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -31,6 +32,11 @@ export default function WeeklyTimetablePage() {
   const [activeFacultyId, setActiveFacultyId] = useState(user?.facultyId || 'FWL-03');
   const [activeFacultyName, setActiveFacultyName] = useState(user?.name || 'Dr. S. Karpusamy');
   const [allFaculty, setAllFaculty] = useState([]);
+
+  // Academic contexts for Class View
+  const [academicContexts, setAcademicContexts] = useState([]);
+  const [selectedContextId, setSelectedContextId] = useState('');
+  const [selectedContextLabel, setSelectedContextLabel] = useState('');
 
   // Fetch faculty list for switcher
   useEffect(() => {
@@ -50,6 +56,28 @@ export default function WeeklyTimetablePage() {
     loadFaculty();
   }, [user]);
 
+  // Fetch academic contexts for class selector
+  useEffect(() => {
+    async function loadContexts() {
+      try {
+        const res = await getAcademicContexts();
+        const list = Array.isArray(res) ? res : res?.data || res?.items || [];
+        setAcademicContexts(list);
+        if (list.length > 0 && !selectedContextId) {
+          const defaultCtx =
+            list.find((c) => c.year === 'III Year' && c.section === 'A') || list[0];
+          setSelectedContextId(defaultCtx._id);
+          setSelectedContextLabel(
+            `${defaultCtx.department || 'CSE'} • ${defaultCtx.year} '${defaultCtx.section}'`
+          );
+        }
+      } catch (err) {
+        console.warn('Could not load academic contexts:', err.message);
+      }
+    }
+    loadContexts();
+  }, [selectedContextId]);
+
   const fetchMatrix = useCallback(async () => {
     setIsLoading(true);
     setError(null);
@@ -58,9 +86,12 @@ export default function WeeklyTimetablePage() {
         const data = await getFacultyTimetable(activeFacultyId);
         setSessions(data.sessions || []);
       } else {
-        // Fetch class schedule for III Year CSE 'A'
-        const data = await getFacultyTimetable('FWL-03');
-        setSessions(data.sessions || []);
+        if (selectedContextId) {
+          const data = await getClassTimetable(selectedContextId);
+          setSessions(data.sessions || []);
+        } else {
+          setSessions([]);
+        }
       }
     } catch (err) {
       console.error('[WeeklyTimetable] Failed to load schedule:', err);
@@ -68,7 +99,7 @@ export default function WeeklyTimetablePage() {
     } finally {
       setIsLoading(false);
     }
-  }, [activeFacultyId, viewMode]);
+  }, [activeFacultyId, selectedContextId, viewMode]);
 
   useEffect(() => {
     fetchMatrix();
@@ -83,9 +114,20 @@ export default function WeeklyTimetablePage() {
     }
   };
 
+  const handleContextChange = (e) => {
+    const ctxId = e.target.value;
+    setSelectedContextId(ctxId);
+    const match = academicContexts.find((c) => c._id === ctxId);
+    if (match) {
+      setSelectedContextLabel(
+        `${match.department || 'CSE'} • ${match.year} '${match.section}'`
+      );
+    }
+  };
+
   const handleRefresh = async () => {
     await fetchMatrix();
-    addToast('Weekly matrix reloaded.', 'success');
+    showToast('Weekly matrix reloaded.', 'success');
   };
 
   const handlePrint = () => {
@@ -116,39 +158,78 @@ export default function WeeklyTimetablePage() {
             ]}
           />
         }
-        badge={<Badge variant="primary">DEPARTMENT OF CSE • III YEAR &apos;A&apos;</Badge>}
+        badge={
+          <Badge variant="primary">
+            {viewMode === 'FACULTY'
+              ? `${activeFacultyName} (${activeFacultyId})`
+              : (selectedContextLabel || 'CLASS TIMETABLE')}
+          </Badge>
+        }
         actions={
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-              <label htmlFor="weekly-faculty-select" style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--color-on-surface-variant)' }}>
-                Faculty:
-              </label>
-              <select
-                id="weekly-faculty-select"
-                className="form-select form-select-sm"
-                value={activeFacultyId}
-                onChange={handleFacultyChange}
-                style={{
-                  padding: '5px 10px',
-                  borderRadius: 'var(--radius-md)',
-                  border: '1px solid var(--color-outline-variant)',
-                  fontSize: '0.8rem',
-                  fontWeight: 600,
-                  color: 'var(--color-primary)',
-                  background: '#ffffff',
-                }}
-              >
-                {allFaculty.length > 0 ? (
-                  allFaculty.map((f) => (
-                    <option key={f.facultyId} value={f.facultyId}>
-                      {f.facultyId}: {f.facultyName}
-                    </option>
-                  ))
-                ) : (
-                  <option value={activeFacultyId}>{activeFacultyName} ({activeFacultyId})</option>
-                )}
-              </select>
-            </div>
+            {viewMode === 'FACULTY' ? (
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <label htmlFor="weekly-faculty-select" style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--color-on-surface-variant)' }}>
+                  Faculty:
+                </label>
+                <select
+                  id="weekly-faculty-select"
+                  className="form-select form-select-sm"
+                  value={activeFacultyId}
+                  onChange={handleFacultyChange}
+                  style={{
+                    padding: '5px 10px',
+                    borderRadius: 'var(--radius-md)',
+                    border: '1px solid var(--color-outline-variant)',
+                    fontSize: '0.8rem',
+                    fontWeight: 600,
+                    color: 'var(--color-primary)',
+                    background: '#ffffff',
+                  }}
+                >
+                  {allFaculty.length > 0 ? (
+                    allFaculty.map((f) => (
+                      <option key={f.facultyId} value={f.facultyId}>
+                        {f.facultyId}: {f.facultyName}
+                      </option>
+                    ))
+                  ) : (
+                    <option value={activeFacultyId}>{activeFacultyName} ({activeFacultyId})</option>
+                  )}
+                </select>
+              </div>
+            ) : (
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <label htmlFor="weekly-context-select" style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--color-on-surface-variant)' }}>
+                  Class:
+                </label>
+                <select
+                  id="weekly-context-select"
+                  className="form-select form-select-sm"
+                  value={selectedContextId}
+                  onChange={handleContextChange}
+                  style={{
+                    padding: '5px 10px',
+                    borderRadius: 'var(--radius-md)',
+                    border: '1px solid var(--color-outline-variant)',
+                    fontSize: '0.8rem',
+                    fontWeight: 600,
+                    color: 'var(--color-primary)',
+                    background: '#ffffff',
+                  }}
+                >
+                  {academicContexts.length > 0 ? (
+                    academicContexts.map((c) => (
+                      <option key={c._id} value={c._id}>
+                        {c.department || 'CSE'} - {c.year} &apos;{c.section}&apos; ({c.academicYear})
+                      </option>
+                    ))
+                  ) : (
+                    <option value="">No academic classes available</option>
+                  )}
+                </select>
+              </div>
+            )}
             <Button variant="outline" size="sm" icon="🖨️" onClick={handlePrint}>
               Print / Export Grid
             </Button>

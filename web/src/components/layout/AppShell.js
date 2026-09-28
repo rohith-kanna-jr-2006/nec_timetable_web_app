@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useLocation } from 'react-router-dom';
-import Sidebar from './Sidebar';
+import MobileDrawer from './MobileDrawer';
 import Topbar from './Topbar';
 import PageContainer from './PageContainer';
 
@@ -39,20 +39,13 @@ export default function AppShell({ role = 'FACULTY', children }) {
 
   return (
     <div className="app-shell">
-      {/* Mobile Drawer Backdrop */}
-      <div
-        className={`ui-sidebar-backdrop ${isMobileOpen ? 'visible' : ''}`}
-        onClick={() => setIsMobileOpen(false)}
-        aria-hidden="true"
-      />
-
-      {/* Shared Responsive Sidebar */}
-      <Sidebar
+      {/* Responsive Navigation: MobileDrawer integrates backdrop & sidebar */}
+      <MobileDrawer
         role={role}
+        isOpen={isMobileOpen}
+        onClose={() => setIsMobileOpen(false)}
         isCollapsed={isCollapsed}
         onToggleCollapse={() => setIsCollapsed(!isCollapsed)}
-        isMobileOpen={isMobileOpen}
-        onCloseMobile={() => setIsMobileOpen(false)}
       />
 
       {/* Main Layout Area */}
