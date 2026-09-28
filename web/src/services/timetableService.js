@@ -3,7 +3,7 @@
  * Handles API calls and schedule matrix transformations for Faculty & Class Timetables.
  */
 
-import api from './api';
+import api from './api.js';
 import { WEEK_DAYS, PERIOD_TIMINGS } from '../constants/schedule';
 
 /**

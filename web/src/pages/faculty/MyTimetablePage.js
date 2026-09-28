@@ -22,7 +22,7 @@ import EmptyState from '../../components/common/EmptyState';
 
 export default function MyTimetablePage() {
   const { user } = useAuth();
-  const { addToast } = useToast();
+  const { showToast } = useToast();
 
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -89,7 +89,7 @@ export default function MyTimetablePage() {
 
   const handleRefresh = async () => {
     await fetchSchedule();
-    addToast('Timetable schedule refreshed successfully.', 'success');
+    showToast('Timetable schedule refreshed successfully.', 'success');
   };
 
   const handlePrint = () => {

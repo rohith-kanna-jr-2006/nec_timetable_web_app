@@ -9,6 +9,8 @@ export default function MobileDrawer({
   isOpen = false,
   onClose = () => {},
   role = 'FACULTY',
+  isCollapsed = false,
+  onToggleCollapse = () => {},
 }) {
   return (
     <>
@@ -19,7 +21,8 @@ export default function MobileDrawer({
       />
       <Sidebar
         role={role}
-        isCollapsed={false}
+        isCollapsed={isCollapsed}
+        onToggleCollapse={onToggleCollapse}
         isMobileOpen={isOpen}
         onCloseMobile={onClose}
       />

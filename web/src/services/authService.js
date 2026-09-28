@@ -110,6 +110,17 @@ export async function getMe() {
 }
 
 /**
+ * Retrieve current user profile (tries remote /api/auth/me first, falls back to stored profile)
+ */
+export async function getCurrentUser() {
+  try {
+    return await getMe();
+  } catch {
+    return getStoredUser();
+  }
+}
+
+/**
  * Terminate user session and clear storage
  */
 export function logout() {
@@ -120,6 +131,7 @@ export function logout() {
 export const authService = {
   login,
   getMe,
+  getCurrentUser,
   logout,
   getStoredUser,
   getStoredToken: getAuthToken,
@@ -127,3 +139,4 @@ export const authService = {
 };
 
 export default authService;
+

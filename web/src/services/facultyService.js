@@ -3,7 +3,7 @@
  * Wraps centralized API client for /api/faculty endpoints.
  */
 
-import { api } from './api';
+import { api } from './api.js';
 
 /**
  * Fetch paginated or filtered list of faculty members.
