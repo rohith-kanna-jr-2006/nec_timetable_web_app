@@ -773,7 +773,234 @@ async function runFacultyCreationTests() {
     await FacultyWorkload.deleteOne({ facultyId: 'FWL-TEST-01' });
 
     // ------------------------------------------------------------
-    // 11. Cleanup Test Users
+    // 11. Focused 14 Phase F Verification Cases
+    // ------------------------------------------------------------
+    console.log('\n--- 11. Focused 14 Phase F Verification Cases ---');
+    const createdCleanupIds = [];
+
+    // Case 1: POST /api/faculty without facultyId
+    const case1Res = await makeRequest(app, {
+      method: 'POST',
+      path: '/api/faculty',
+      headers: { Authorization: `Bearer ${hodToken}` },
+      body: {
+        facultyName: 'Dr. Focused Auto One',
+        designation: 'Assistant Professor',
+        department: 'Department of Computer Science and Engineering',
+      },
+    });
+    assert(case1Res.statusCode === 201, 'Case 1: POST /api/faculty without facultyId succeeds with HTTP 201');
+    assert(/^FWL-\d+$/.test(case1Res.body.data.facultyId), `Case 1: facultyId automatically generated matching FWL-XX pattern (${case1Res.body.data.facultyId})`);
+    createdCleanupIds.push(case1Res.body.data.facultyId);
+
+    // Case 2: POST /api/faculty with generated/explicit facultyId
+    const explicitId = 'FWL-EXP-99';
+    const case2Res = await makeRequest(app, {
+      method: 'POST',
+      path: '/api/faculty',
+      headers: { Authorization: `Bearer ${hodToken}` },
+      body: {
+        facultyId: explicitId,
+        facultyName: 'Dr. Explicit Two',
+        designation: 'Associate Professor',
+      },
+    });
+    assert(case2Res.statusCode === 201, 'Case 2: POST /api/faculty with explicit facultyId succeeds with HTTP 201');
+    assert(case2Res.body.data.facultyId === explicitId, 'Case 2: Exact explicit facultyId persisted');
+    createdCleanupIds.push(explicitId);
+
+    // Case 3: Sequential facultyId generation
+    const case3Res1 = await makeRequest(app, {
+      method: 'POST',
+      path: '/api/faculty',
+      headers: { Authorization: `Bearer ${hodToken}` },
+      body: { facultyName: 'Dr. Sequential Alpha', designation: 'Assistant Professor' },
+    });
+    const case3Res2 = await makeRequest(app, {
+      method: 'POST',
+      path: '/api/faculty',
+      headers: { Authorization: `Bearer ${hodToken}` },
+      body: { facultyName: 'Dr. Sequential Beta', designation: 'Assistant Professor' },
+    });
+    assert(case3Res1.statusCode === 201 && case3Res2.statusCode === 201, 'Case 3: Two consecutive sequential faculties created');
+    const num1 = parseInt(case3Res1.body.data.facultyId.replace('FWL-', ''), 10);
+    const num2 = parseInt(case3Res2.body.data.facultyId.replace('FWL-', ''), 10);
+    assert(num2 === num1 + 1, `Case 3: IDs are strictly sequential (${case3Res1.body.data.facultyId} -> ${case3Res2.body.data.facultyId})`);
+    createdCleanupIds.push(case3Res1.body.data.facultyId, case3Res2.body.data.facultyId);
+
+    // Case 4: Duplicate email & duplicate identity handling
+    const dupEmail = 'dup.faculty.unique@nec.edu.in';
+    const case4Res1 = await makeRequest(app, {
+      method: 'POST',
+      path: '/api/faculty',
+      headers: { Authorization: `Bearer ${hodToken}` },
+      body: {
+        facultyName: 'Dr. Original Identity',
+        designation: 'Assistant Professor',
+        email: dupEmail,
+      },
+    });
+    assert(case4Res1.statusCode === 201, 'Case 4: Initial faculty with email created');
+    createdCleanupIds.push(case4Res1.body.data.facultyId);
+
+    const case4ResDupEmail = await makeRequest(app, {
+      method: 'POST',
+      path: '/api/faculty',
+      headers: { Authorization: `Bearer ${hodToken}` },
+      body: {
+        facultyName: 'Dr. Duplicate Email Attempt',
+        designation: 'Professor',
+        email: dupEmail,
+      },
+    });
+    assert(case4ResDupEmail.statusCode === 409, 'Case 4: Duplicate email rejected with HTTP 409');
+    assert(case4ResDupEmail.body.code === 'DUPLICATE_EMAIL', 'Case 4: Duplicate email returns code DUPLICATE_EMAIL');
+
+    const case4ResDupId = await makeRequest(app, {
+      method: 'POST',
+      path: '/api/faculty',
+      headers: { Authorization: `Bearer ${hodToken}` },
+      body: {
+        facultyId: case4Res1.body.data.facultyId,
+        facultyName: 'Dr. Duplicate ID Attempt',
+        designation: 'Professor',
+      },
+    });
+    assert(case4ResDupId.statusCode === 409, 'Case 4: Duplicate faculty ID rejected with HTTP 409');
+    assert(case4ResDupId.body.code === 'DUPLICATE_ID', 'Case 4: Duplicate ID returns code DUPLICATE_ID');
+
+    // Case 5: Valid workload creation with flat fields
+    const case5Payload = {
+      facultyName: 'Dr. Flat Workload Tester',
+      designation: 'Associate Professor',
+      ugTheory1: [{ courseCode: '22CSC14', courseName: 'Principles of Compiler Design', allocation: 'UG III Year A', hours: 4 }],
+      lab1: [{ courseCode: '22CSP07', courseName: 'Compiler Design Laboratory', allocation: 'UG III Year A', hours: 2 }],
+      pg: [{ courseCode: '22CPB05', courseName: 'Advanced Distributed Systems', allocation: 'PG I Year' }],
+      others: [{ courseName: 'Mini Project Mentorship', allocation: 'UG II Year B', hours: 2 }],
+      responsibilities: [{ role: 'Timetable Coordinator', hours: 3 }],
+      sourceTotalHours: 99, // Deliberately mismatching to verify server authority
+    };
+    const case5Res = await makeRequest(app, {
+      method: 'POST',
+      path: '/api/faculty',
+      headers: { Authorization: `Bearer ${hodToken}` },
+      body: case5Payload,
+    });
+    assert(case5Res.statusCode === 201, 'Case 5: Flat workload allocation payload accepted with HTTP 201');
+    const flatFacultyId = case5Res.body.data.facultyId;
+    createdCleanupIds.push(flatFacultyId);
+
+    // Case 6: Workload persistence across collections
+    const persistedWl = await FacultyWorkload.findOne({ facultyId: flatFacultyId });
+    assert(Boolean(persistedWl), 'Case 6: Workload document persisted in FacultyWorkload');
+    assert(persistedWl.teaching.ugTheory1.length === 1, 'Case 6: ugTheory1 persisted correctly');
+    assert(persistedWl.teaching.lab1.length === 1, 'Case 6: lab1 persisted correctly');
+    assert(persistedWl.teaching.pg.length === 1, 'Case 6: pg persisted correctly');
+    assert(persistedWl.teaching.others.length === 1, 'Case 6: others persisted correctly');
+    assert(persistedWl.responsibilities.length === 1, 'Case 6: responsibilities persisted correctly');
+
+    // Case 7: Server-authoritative total calculation
+    // 4 (theory) + 2 (lab) + 1 (pg) + 2 (others) = 9 teaching hours; 3 responsibility hours = 12 total hours
+    assert(persistedWl.calculatedTeachingHours === 9, `Case 7: Calculated teaching hours is 9 (got: ${persistedWl.calculatedTeachingHours})`);
+    assert(persistedWl.calculatedResponsibilityHours === 3, `Case 7: Calculated responsibility hours is 3 (got: ${persistedWl.calculatedResponsibilityHours})`);
+    assert(persistedWl.calculatedTotalHours === 12, `Case 7: Calculated total hours is 12 (client-supplied 99 overridden, got: ${persistedWl.calculatedTotalHours})`);
+    assert(persistedWl.status === 'REVIEW REQUIRED', 'Case 7: Status set to REVIEW REQUIRED due to mismatch with sourceTotalHours');
+
+    // Case 8: Rollback / failure behavior
+    const failRollbackPayload = {
+      facultyName: 'Dr. Rollback Attempt',
+      designation: 'Assistant Professor',
+      responsibilities: [{ role: 'Nonexistent Bogus Duty', hours: 2 }],
+    };
+    const case8Res = await makeRequest(app, {
+      method: 'POST',
+      path: '/api/faculty',
+      headers: { Authorization: `Bearer ${hodToken}` },
+      body: failRollbackPayload,
+    });
+    assert(case8Res.statusCode === 400, 'Case 8: Invalid payload rejected with HTTP 400');
+    const orphanedFaculty = await Faculty.findOne({ facultyName: 'Dr. Rollback Attempt' });
+    assert(orphanedFaculty === null, 'Case 8: Rollback verified - no orphaned Faculty document exists');
+
+    // Case 9: GET /api/faculty/:facultyId/allocations
+    const case9Res = await makeRequest(app, {
+      method: 'GET',
+      path: `/api/faculty/${flatFacultyId}/allocations`,
+    });
+    assert(case9Res.statusCode === 200, 'Case 9: GET /api/faculty/:facultyId/allocations returns HTTP 200');
+    assert(case9Res.body.data.summary.totalHours === 12, 'Case 9: Allocations summary totalHours is 12');
+    assert(case9Res.body.data.allocations.length === 5, 'Case 9: Allocations list contains 5 structured rows');
+
+    // Case 10: Unknown faculty allocations
+    const case10Res = await makeRequest(app, {
+      method: 'GET',
+      path: '/api/faculty/FWL-NONEXISTENT-999/allocations',
+    });
+    assert(case10Res.statusCode === 404, 'Case 10: Unknown faculty allocations returns HTTP 404');
+    assert(case10Res.body.code === 'NOT_FOUND', 'Case 10: Unknown faculty returns NOT_FOUND code');
+
+    // Case 11: Auth failure (missing token)
+    const case11Res = await makeRequest(app, {
+      method: 'POST',
+      path: '/api/faculty',
+      body: { facultyName: 'Dr. No Auth', designation: 'Assistant Professor' },
+    });
+    assert(case11Res.statusCode === 401, 'Case 11: Missing auth token rejected with HTTP 401');
+    assert(case11Res.body.code === 'UNAUTHORIZED', 'Case 11: Returns UNAUTHORIZED code');
+
+    // Case 12: Forbidden role (AC and FACULTY)
+    const case12AcRes = await makeRequest(app, {
+      method: 'POST',
+      path: '/api/faculty',
+      headers: { Authorization: `Bearer ${acToken}` },
+      body: { facultyName: 'Dr. AC Denied', designation: 'Assistant Professor' },
+    });
+    assert(case12AcRes.statusCode === 403, 'Case 12: AC role forbidden from creating faculty (HTTP 403)');
+    assert(case12AcRes.body.code === 'FORBIDDEN', 'Case 12: AC returns code FORBIDDEN');
+
+    const case12FacRes = await makeRequest(app, {
+      method: 'POST',
+      path: '/api/faculty',
+      headers: { Authorization: `Bearer ${facultyToken}` },
+      body: { facultyName: 'Dr. Faculty Denied', designation: 'Assistant Professor' },
+    });
+    assert(case12FacRes.statusCode === 403, 'Case 12: FACULTY role forbidden from creating faculty (HTTP 403)');
+    assert(case12FacRes.body.code === 'FORBIDDEN', 'Case 12: FACULTY returns code FORBIDDEN');
+
+    // Case 13: Malformed payload
+    const case13MissingName = await makeRequest(app, {
+      method: 'POST',
+      path: '/api/faculty',
+      headers: { Authorization: `Bearer ${hodToken}` },
+      body: { designation: 'Professor' },
+    });
+    assert(case13MissingName.statusCode === 400, 'Case 13: Missing facultyName returns HTTP 400');
+    assert(case13MissingName.body.code === 'VALIDATION_ERROR', 'Case 13: Returns VALIDATION_ERROR code');
+
+    const case13MissingDesig = await makeRequest(app, {
+      method: 'POST',
+      path: '/api/faculty',
+      headers: { Authorization: `Bearer ${hodToken}` },
+      body: { facultyName: 'Dr. No Desig' },
+    });
+    assert(case13MissingDesig.statusCode === 400, 'Case 13: Missing designation returns HTTP 400');
+    assert(case13MissingDesig.body.code === 'VALIDATION_ERROR', 'Case 13: Returns VALIDATION_ERROR code');
+
+    // Case 14: R22 curriculum regression in allocations
+    // Ensure Course reference 22CSC14 is indeed a verified R22 course
+    const CourseModel = require('../src/models/Course');
+    const r22CourseCheck = await CourseModel.findOne({ courseCode: '22CSC14' });
+    assert(Boolean(r22CourseCheck), 'Case 14: R22 curriculum course 22CSC14 exists in database');
+    assert(r22CourseCheck.regulation === 'R22', 'Case 14: Course regulation is verified R22');
+
+    // Clean up created focused test faculty
+    if (createdCleanupIds.length > 0) {
+      await Faculty.deleteMany({ facultyId: { $in: createdCleanupIds } });
+      await FacultyWorkload.deleteMany({ facultyId: { $in: createdCleanupIds } });
+    }
+
+    // ------------------------------------------------------------
+    // 12. Cleanup Test Users
     // ------------------------------------------------------------
     await Faculty.deleteMany({ facultyId: { $in: ['FWL-TEST-01', 'FWL-TEST-02', 'FWL-TEST-03'] } });
     await FacultyWorkload.deleteMany({ facultyId: { $in: ['FWL-TEST-01', 'FWL-TEST-02', 'FWL-TEST-03'] } });

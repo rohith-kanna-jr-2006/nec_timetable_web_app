@@ -239,8 +239,28 @@ function validateFacultyCreationPayload(req) {
     }
   }
 
-  // 2. Teaching Validation
-  errors.push(...validateTeachingPayload(body.teaching));
+  // 2. Teaching Validation (supports nested teaching or flat allocation properties)
+  let teachingToValidate = body.teaching;
+  if (teachingToValidate === undefined) {
+    if (
+      body.ugTheory1 !== undefined ||
+      body.ugTheory2 !== undefined ||
+      body.lab1 !== undefined ||
+      body.lab2 !== undefined ||
+      body.pg !== undefined ||
+      body.others !== undefined
+    ) {
+      teachingToValidate = {
+        ugTheory1: body.ugTheory1,
+        ugTheory2: body.ugTheory2,
+        lab1: body.lab1,
+        lab2: body.lab2,
+        pg: body.pg,
+        others: body.others,
+      };
+    }
+  }
+  errors.push(...validateTeachingPayload(teachingToValidate));
 
   // 3. Responsibilities Validation
   errors.push(...validateResponsibilitiesPayload(body.responsibilities));

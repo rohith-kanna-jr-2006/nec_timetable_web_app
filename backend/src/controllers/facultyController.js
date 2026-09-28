@@ -114,9 +114,11 @@ async function generateNextFacultyId() {
     FacultyWorkload.find({ facultyId: /^FWL-\d+$/i }, { facultyId: 1 }),
   ]);
 
+  const existingIds = new Set();
   let maxNum = 0;
   const inspectDoc = (doc) => {
     if (!doc || !doc.facultyId) return;
+    existingIds.add(doc.facultyId.toUpperCase());
     const m = doc.facultyId.match(/^FWL-(\d+)$/i);
     if (m) {
       const num = parseInt(m[1], 10);
@@ -127,8 +129,13 @@ async function generateNextFacultyId() {
   facultyDocs.forEach(inspectDoc);
   workloadDocs.forEach(inspectDoc);
 
-  const nextNum = maxNum > 0 ? maxNum + 1 : 1;
-  return `FWL-${String(nextNum).padStart(2, '0')}`;
+  let candidateNum = maxNum > 0 ? maxNum + 1 : 1;
+  let candidateId = `FWL-${String(candidateNum).padStart(2, '0')}`;
+  while (existingIds.has(candidateId)) {
+    candidateNum++;
+    candidateId = `FWL-${String(candidateNum).padStart(2, '0')}`;
+  }
+  return candidateId;
 }
 
 /**
@@ -146,6 +153,12 @@ async function createFaculty(req, res, next) {
       phone,
       roles,
       teaching: rawTeaching,
+      ugTheory1,
+      ugTheory2,
+      lab1,
+      lab2,
+      pg,
+      others,
       responsibilities: rawResponsibilities,
       sourceTotalHours: rawSourceTotalHours,
     } = req.body;
@@ -165,12 +178,28 @@ async function createFaculty(req, res, next) {
       return errorResponse(res, `Workload record for faculty '${finalFacultyId}' already exists`, 409, 'DUPLICATE_ID');
     }
 
+    if (email && email.trim()) {
+      const existingEmail = await Faculty.findOne({
+        email: email.trim().toLowerCase(),
+      });
+      if (existingEmail) {
+        return errorResponse(res, `Faculty with email '${email.trim()}' already exists`, 409, 'DUPLICATE_EMAIL');
+      }
+    }
+
     const dept = department && department.trim()
       ? department.trim()
       : 'Department of Computer Science and Engineering';
 
-    // 2. Parse and structure Teaching Allocations
-    const teachingData = rawTeaching || {};
+    // 2. Parse and structure Teaching Allocations (supports both nested and flat)
+    const teachingData = {
+      ugTheory1: (rawTeaching && rawTeaching.ugTheory1) || ugTheory1 || [],
+      ugTheory2: (rawTeaching && rawTeaching.ugTheory2) || ugTheory2 || [],
+      lab1: (rawTeaching && rawTeaching.lab1) || lab1 || [],
+      lab2: (rawTeaching && rawTeaching.lab2) || lab2 || [],
+      pg: (rawTeaching && rawTeaching.pg) || pg || [],
+      others: (rawTeaching && rawTeaching.others) || others || [],
+    };
     const normalizeTeachingItem = (item, defaultCategory) => {
       const parsed = parseYearAndSection(item.allocation);
       return {
@@ -339,7 +368,13 @@ async function getFacultyAllocations(req, res, next) {
     const { facultyId } = req.params;
     const { category, year, section, courseCode, allocationType } = req.query;
 
-    const workload = await FacultyWorkload.findOne({ facultyId });
+    let workload = await FacultyWorkload.findOne({ facultyId });
+    if (!workload && facultyId && facultyId.match(/^[0-9a-fA-F]{24}$/)) {
+      const fac = await Faculty.findById(facultyId);
+      if (fac) {
+        workload = await FacultyWorkload.findOne({ facultyId: fac.facultyId });
+      }
+    }
     if (!workload) {
       return errorResponse(res, `Allocations for faculty '${facultyId}' not found`, 404, 'NOT_FOUND');
     }
