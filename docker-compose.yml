@@ -1,0 +1,54 @@
+services:
+  mongodb:
+    image: mongo:7.0
+    container_name: nec-faculty-mongo-test
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_DATABASE: nec_faculty_test_db
+    ports:
+      - "27018:27017"
+    volumes:
+      - nec_test_mongo_data:/data/db
+    networks:
+      - nec_test_network
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: nec-faculty-backend-test
+    restart: unless-stopped
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    environment:
+      PORT: 5000
+      NODE_ENV: development
+      MONGODB_URI: mongodb://mongodb:27017/nec_faculty_test_db
+      JWT_SECRET: nec_faculty_test_jwt_secret_key_2026_docker
+      JWT_EXPIRES_IN: 7d
+      CLIENT_ORIGIN: "*"
+      DEV_SEED_PASSWORD: Password123!
+    ports:
+      - "5000:5000"
+    networks:
+      - nec_test_network
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:5000/api/health', (r) => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+networks:
+  nec_test_network:
+    driver: bridge
+
+volumes:
+  nec_test_mongo_data:
