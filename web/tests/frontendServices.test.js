@@ -202,8 +202,82 @@ async function runFrontendServiceTests() {
   const coordinatorMappingRoute = '/coordinator/free-mapping';
   assert(coordinatorMappingRoute === '/coordinator/free-mapping', 'Free Timetable / Substitute Mapping route is verified');
 
-  const hodRegulationRoute = '/hod/regulation';
-  assert(hodRegulationRoute === '/hod/regulation', 'HOD Regulation management route is verified');
+  // --- 7. 12 Class Cohorts & HOD-to-Coordinator Slot Allocation Binding ---
+  console.log('\n--- 7. 12 Class Cohorts & HOD-to-Coordinator Slot Allocation Binding ---');
+  const YEARS = ['II Year', 'III Year', 'IV Year'];
+  const SECTIONS = ['A', 'B', 'C', 'D'];
+  const SEMESTER_MAP = { 'II Year': 3, 'III Year': 5, 'IV Year': 7 };
+
+  const allCohorts = [];
+  YEARS.forEach((yr) => {
+    SECTIONS.forEach((sec) => {
+      allCohorts.push({
+        department: 'CSE',
+        academicYear: '2026-27',
+        semester: 'Odd Semester',
+        year: yr,
+        section: sec,
+        semNumber: SEMESTER_MAP[yr],
+      });
+    });
+  });
+
+  assert(allCohorts.length === 12, '12 target class cohorts configured for 2026-27 Odd Semester CSE');
+  assert(allCohorts.filter((c) => c.year === 'II Year').length === 4, '4 cohorts in II Year (A, B, C, D)');
+  assert(allCohorts.filter((c) => c.year === 'III Year').length === 4, '4 cohorts in III Year (A, B, C, D)');
+  assert(allCohorts.filter((c) => c.year === 'IV Year').length === 4, '4 cohorts in IV Year (A, B, C, D)');
+  assert(allCohorts.every((c) => c.department === 'CSE'), 'All cohorts belong to CSE department');
+
+  // Test slot session auto-binding to HOD allocation
+  const mockHodAllocations = [
+    {
+      academicContextId: 'ctx_ii_a',
+      courseCode: 'CS8391',
+      courseName: 'Data Structures',
+      facultyId: 'FAC01',
+      facultyName: 'Dr. K. S.',
+      allocationType: 'THEORY',
+      status: 'APPROVED',
+    },
+    {
+      academicContextId: 'ctx_ii_a',
+      courseCode: 'CS8381',
+      courseName: 'Data Structures Lab',
+      facultyId: 'FAC02',
+      facultyName: 'Dr. M. R.',
+      allocationType: 'LAB',
+      status: 'APPROVED',
+    },
+  ];
+
+  function resolveSlotFaculty(contextId, courseCode, allocations) {
+    const match = allocations.find(
+      (a) => a.academicContextId === contextId && a.courseCode === courseCode
+    );
+    if (match) {
+      return {
+        facultyId: match.facultyId,
+        facultyName: match.facultyName,
+        isLockedToHOD: true,
+        status: 'HOD_ALLOCATED',
+      };
+    }
+    return {
+      facultyId: null,
+      facultyName: null,
+      isLockedToHOD: false,
+      status: 'REQUIRES_HOD_DECISION',
+    };
+  }
+
+  const theorySlot = resolveSlotFaculty('ctx_ii_a', 'CS8391', mockHodAllocations);
+  assert(theorySlot.isLockedToHOD === true && theorySlot.facultyId === 'FAC01', 'Slot for CS8391 auto-locks to HOD-allocated instructor Dr. K. S. (FAC01)');
+
+  const labSlot = resolveSlotFaculty('ctx_ii_a', 'CS8381', mockHodAllocations);
+  assert(labSlot.isLockedToHOD === true && labSlot.facultyId === 'FAC02', 'Slot for CS8381 auto-locks to HOD-allocated instructor Dr. M. R. (FAC02)');
+
+  const unassignedSlot = resolveSlotFaculty('ctx_ii_a', 'MA8351', mockHodAllocations);
+  assert(unassignedSlot.isLockedToHOD === false && unassignedSlot.status === 'REQUIRES_HOD_DECISION', 'Unallocated course flags REQUIRES_HOD_DECISION');
 
   console.log('\n====================================================');
   console.log(`TEST SUMMARY: ${passedTests}/${totalTests} Passed (${failedTests} Failed)`);

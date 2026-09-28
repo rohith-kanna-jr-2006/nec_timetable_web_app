@@ -5,7 +5,7 @@ import {
   assignClassAdvisor,
   deactivateClassAdvisor,
 } from '../../services/hodAllocationService';
-import { getAcademicContexts } from '../../services/academicContextService';
+import { getAcademicContexts, createAcademicContext } from '../../services/academicContextService';
 import { getFacultyList } from '../../services/facultyService';
 import PageHeader from '../../components/common/PageHeader';
 import Breadcrumbs from '../../components/layout/Breadcrumbs';
@@ -14,8 +14,24 @@ import Badge from '../../components/common/Badge';
 import Button from '../../components/common/Button';
 import Spinner from '../../components/common/Spinner';
 import ErrorState from '../../components/common/ErrorState';
-import EmptyState from '../../components/common/EmptyState';
 import Modal from '../../components/common/Modal';
+import Select from '../../components/common/Select';
+
+// Authoritative 12 target class cohorts for 2026-27 Odd Semester CSE
+const TARGET_CLASSES = [
+  { year: 'II Year', section: 'A' },
+  { year: 'II Year', section: 'B' },
+  { year: 'II Year', section: 'C' },
+  { year: 'II Year', section: 'D' },
+  { year: 'III Year', section: 'A' },
+  { year: 'III Year', section: 'B' },
+  { year: 'III Year', section: 'C' },
+  { year: 'III Year', section: 'D' },
+  { year: 'IV Year', section: 'A' },
+  { year: 'IV Year', section: 'B' },
+  { year: 'IV Year', section: 'C' },
+  { year: 'IV Year', section: 'D' },
+];
 
 export default function ClassAdvisorPage() {
   const { showToast } = useToast();
@@ -25,10 +41,13 @@ export default function ClassAdvisorPage() {
   const [contexts, setContexts] = useState([]);
   const [facultyList, setFacultyList] = useState([]);
 
-  // Modal State
+  // Filter state
+  const [selectedYearFilter, setSelectedYearFilter] = useState('ALL');
+
+  // Assignment Modal State
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [assigning, setAssigning] = useState(false);
-  const [selectedContextId, setSelectedContextId] = useState('');
+  const [activeTargetCohort, setActiveTargetCohort] = useState(null);
   const [selectedFacultyId, setSelectedFacultyId] = useState('');
   const [formValidation, setFormValidation] = useState('');
 
@@ -49,7 +68,6 @@ export default function ClassAdvisorPage() {
       if (ctxRes.status === 'fulfilled' && ctxRes.value) {
         const list = Array.isArray(ctxRes.value) ? ctxRes.value : ctxRes.value.data || [];
         setContexts(list);
-        if (list.length > 0 && !selectedContextId) setSelectedContextId(list[0]._id);
       }
       if (facRes.status === 'fulfilled' && facRes.value) {
         const list = facRes.value.items || facRes.value.data || (Array.isArray(facRes.value) ? facRes.value : []);
@@ -68,21 +86,57 @@ export default function ClassAdvisorPage() {
     loadData();
   }, []);
 
-  const handleAssign = async (e) => {
+  const handleOpenAssignModal = (target) => {
+    setActiveTargetCohort(target);
+    setSelectedFacultyId(facultyList[0]?.facultyId || '');
+    setFormValidation('');
+    setIsModalOpen(true);
+  };
+
+  const handleAssignSubmit = async (e) => {
     e.preventDefault();
-    if (!selectedContextId || !selectedFacultyId) {
-      setFormValidation('Both cohort and faculty member are required.');
+    if (!selectedFacultyId) {
+      setFormValidation('Please select a faculty member.');
       return;
     }
 
     try {
       setAssigning(true);
       setFormValidation('');
+
+      // Find or create academic context for this target class
+      let ctx = contexts.find(
+        (c) =>
+          c.year === activeTargetCohort.year &&
+          c.section === activeTargetCohort.section &&
+          c.department === 'CSE'
+      );
+
+      if (!ctx) {
+        // Create context on the fly if missing in DB
+        const createdCtx = await createAcademicContext({
+          academicYear: '2026-27',
+          semester: 'Odd Semester',
+          department: 'CSE',
+          year: activeTargetCohort.year,
+          section: activeTargetCohort.section,
+          program: 'UG',
+          status: 'ACTIVE',
+        });
+        ctx = createdCtx?.data || createdCtx;
+      }
+
+      const contextId = ctx?._id || ctx?.id;
+      if (!contextId) {
+        throw new Error('Unable to resolve academic context identifier.');
+      }
+
       await assignClassAdvisor({
-        academicContextId: selectedContextId,
+        academicContextId: contextId,
         facultyId: selectedFacultyId,
       });
-      showToast('Class Advisor appointed successfully.', 'success');
+
+      showToast(`Class Advisor appointed for ${activeTargetCohort.year} Section ${activeTargetCohort.section}.`, 'success');
       setIsModalOpen(false);
       await loadData();
     } catch (err) {
@@ -93,122 +147,194 @@ export default function ClassAdvisorPage() {
     }
   };
 
-  const handleDeactivate = async (id, name) => {
-    if (!window.confirm(`Deactivate Class Advisor appointment for ${name}?`)) return;
+  const handleDeactivate = async (id, facultyLabel) => {
+    if (!window.confirm(`Deactivate Class Advisor appointment for ${facultyLabel}?`)) return;
     try {
       await deactivateClassAdvisor(id);
       showToast('Class Advisor assignment deactivated.', 'info');
       await loadData();
     } catch (err) {
+      console.error('[ClassAdvisorPage] Deactivation failed:', err);
       showToast(err.message || 'Failed to deactivate assignment.', 'error');
     }
   };
 
+  const filteredTargets = TARGET_CLASSES.filter((t) => {
+    if (selectedYearFilter === 'ALL') return true;
+    return t.year === selectedYearFilter;
+  });
+
   return (
     <div>
       <PageHeader
-        title="Class Advisor Appointments"
-        description="Sole statutory appointing authority for departmental Class Advisors across CSE cohorts."
+        title="Class Advisor Management"
+        description="Statutory HOD authority for appointing and managing faculty Class Advisors across all 12 undergraduate CSE class cohorts."
         breadcrumbs={[
           { label: 'HOD Portal', path: '/hod/dashboard' },
-          { label: 'Class Advisors' },
+          { label: 'Class Advisor' },
         ]}
-        badge={<Badge variant="warning">HOD EXCLUSIVE APPOINTMENT</Badge>}
+        badge={<Badge variant="primary">HOD AUTHORITY</Badge>}
         actions={
-          <Button
-            variant="primary"
-            size="sm"
-            icon="🎓"
-            onClick={() => {
-              setFormValidation('');
-              setIsModalOpen(true);
-            }}
-          >
-            Appoint Class Advisor
-          </Button>
+          <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+            <span style={{ fontSize: '0.8125rem', fontWeight: 600, color: 'var(--color-outline)' }}>Filter Year:</span>
+            <select
+              value={selectedYearFilter}
+              onChange={(e) => setSelectedYearFilter(e.target.value)}
+              className="form-select"
+              style={{ padding: '6px 12px', fontSize: '0.8125rem', borderRadius: 'var(--radius-md)' }}
+            >
+              <option value="ALL">All Years (II, III, IV)</option>
+              <option value="II Year">II Year</option>
+              <option value="III Year">III Year</option>
+              <option value="IV Year">IV Year</option>
+            </select>
+            <Button variant="outline" size="sm" icon="🔄" onClick={loadData}>
+              Refresh
+            </Button>
+          </div>
         }
       />
 
-      <Card style={{ padding: 0, overflow: 'hidden' }}>
-        <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--color-border-subtle)' }}>
-          <h3 style={{ margin: 0, fontSize: '1rem', fontWeight: 700, color: 'var(--color-primary)' }}>
-            Designated Class Advisors ({advisors.length})
-          </h3>
+      {/* Target Academic Context Header */}
+      <Card style={{ marginBottom: '20px', padding: '16px 20px', background: 'var(--color-surface-container-low)' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
+          <div>
+            <div style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--color-outline)', textTransform: 'uppercase' }}>
+              Academic Target Context
+            </div>
+            <div style={{ fontSize: '1.125rem', fontWeight: 800, color: 'var(--color-primary)', marginTop: '2px' }}>
+              Academic Year 2026-27 — Odd Semester — Department of Computer Science & Engineering
+            </div>
+          </div>
+          <div style={{ display: 'flex', gap: '8px' }}>
+            <Badge variant="secondary">Total Cohorts: 12 Classes</Badge>
+            <Badge variant="primary">Target: II, III, IV (Sec A, B, C, D)</Badge>
+          </div>
         </div>
+      </Card>
 
+      {/* Class Advisor Grid for all 12 Target Classes */}
+      <Card style={{ padding: 0, overflow: 'hidden' }}>
         {loading ? (
-          <div style={{ padding: '48px 0', textAlign: 'center' }}>
-            <Spinner size="md" />
+          <div style={{ textAlign: 'center', padding: '48px 0' }}>
+            <Spinner size="lg" />
             <div style={{ marginTop: '12px', fontSize: '0.875rem', color: 'var(--color-outline)' }}>
-              Loading Class Advisors...
+              Loading Class Advisor roster...
             </div>
           </div>
         ) : error ? (
           <div style={{ padding: '24px' }}>
             <ErrorState message={error} onRetry={loadData} />
           </div>
-        ) : advisors.length === 0 ? (
-          <div style={{ padding: '32px' }}>
-            <EmptyState
-              title="No Class Advisors appointed"
-              description="No faculty members have been designated as Class Advisors for current cohorts."
-              action={
-                <Button
-                  variant="primary"
-                  size="sm"
-                  icon="🎓"
-                  onClick={() => setIsModalOpen(true)}
-                >
-                  Appoint First Advisor
-                </Button>
-              }
-            />
-          </div>
         ) : (
           <div className="ui-table-scroll-container">
-            <table style={{ width: '100%', minWidth: '650px', borderCollapse: 'collapse', fontSize: '0.875rem' }}>
+            <table style={{ width: '100%', minWidth: '850px', borderCollapse: 'collapse', fontSize: '0.875rem' }}>
               <thead>
                 <tr style={{ backgroundColor: 'var(--color-surface-container-low)', textAlign: 'left', borderBottom: '1px solid var(--color-surface-container)' }}>
-                  <th style={{ padding: '12px 16px', fontWeight: 600 }}>Cohort Class</th>
-                  <th style={{ padding: '12px 16px', fontWeight: 600 }}>Appointed Faculty</th>
-                  <th style={{ padding: '12px 16px', fontWeight: 600 }}>Faculty ID</th>
-                  <th style={{ padding: '12px 16px', fontWeight: 600 }}>Appointed By</th>
-                  <th style={{ padding: '12px 16px', fontWeight: 600 }}>Status</th>
-                  <th style={{ padding: '12px 16px', fontWeight: 600, textAlign: 'right' }}>Actions</th>
+                  <th style={{ padding: '12px 16px', fontWeight: 600 }}>Class Cohort</th>
+                  <th style={{ padding: '12px 16px', fontWeight: 600 }}>Semester & Year</th>
+                  <th style={{ padding: '12px 16px', fontWeight: 600 }}>Assigned Class Advisor</th>
+                  <th style={{ padding: '12px 16px', fontWeight: 600 }}>Advisor Status</th>
+                  <th style={{ padding: '12px 16px', fontWeight: 600, textAlign: 'right' }}>HOD Action</th>
                 </tr>
               </thead>
               <tbody>
-                {advisors.map((adv) => {
-                  const fac = facultyList.find((f) => f.facultyId === adv.facultyId);
+                {filteredTargets.map((target) => {
+                  // Find matching context
+                  const ctx = contexts.find(
+                    (c) => c.year === target.year && c.section === target.section && c.department === 'CSE'
+                  );
+                  const ctxId = ctx?._id || ctx?.id;
+
+                  // Find active advisors for this context
+                  const activeAdvisors = advisors.filter(
+                    (a) =>
+                      a.status === 'ACTIVE' &&
+                      ((ctxId && String(a.academicContextId?._id || a.academicContextId) === String(ctxId)) ||
+                        (a.academicContextId?.year === target.year && a.academicContextId?.section === target.section))
+                  );
+
+                  const isConflict = activeAdvisors.length > 1;
+                  const primaryAdvisor = activeAdvisors[0];
+                  const facultyMatch = primaryAdvisor
+                    ? facultyList.find((f) => f.facultyId === primaryAdvisor.facultyId)
+                    : null;
+
                   return (
-                    <tr key={adv._id} style={{ borderBottom: '1px solid var(--color-surface-container)' }}>
-                      <td style={{ padding: '12px 16px', fontWeight: 600, color: 'var(--color-primary)' }}>
-                        {adv.academicContextId?.year ? `${adv.academicContextId.year} '${adv.academicContextId.section}'` : 'CSE'}
-                      </td>
-                      <td style={{ padding: '12px 16px', fontWeight: 500 }}>
-                        {fac?.facultyName || adv.facultyId}
-                      </td>
-                      <td style={{ padding: '12px 16px', fontFamily: 'var(--font-mono)' }}>
-                        {adv.facultyId}
-                      </td>
-                      <td style={{ padding: '12px 16px', color: 'var(--color-on-surface-variant)' }}>
-                        {adv.assignedBy || 'HOD'}
+                    <tr
+                      key={`${target.year}-${target.section}`}
+                      style={{
+                        borderBottom: '1px solid var(--color-surface-container)',
+                        backgroundColor: isConflict
+                          ? 'rgba(239, 68, 68, 0.04)'
+                          : !primaryAdvisor
+                          ? 'rgba(245, 158, 11, 0.02)'
+                          : 'transparent',
+                      }}
+                    >
+                      <td style={{ padding: '12px 16px', fontWeight: 700, color: 'var(--color-primary)' }}>
+                        {target.year} — Section &apos;{target.section}&apos;
                       </td>
                       <td style={{ padding: '12px 16px' }}>
-                        <Badge variant={adv.status === 'ACTIVE' ? 'success' : 'neutral'}>
-                          {adv.status || 'ACTIVE'}
-                        </Badge>
+                        2026-27 (Odd Semester)
+                      </td>
+                      <td style={{ padding: '12px 16px' }}>
+                        {isConflict ? (
+                          <div>
+                            <div style={{ color: 'var(--color-error)', fontWeight: 700, fontSize: '0.8125rem' }}>
+                              ⚠️ [CONFLICT] Multiple Active Advisors Found:
+                            </div>
+                            <div style={{ marginTop: '4px', fontSize: '0.75rem', color: 'var(--color-on-surface-variant)' }}>
+                              {activeAdvisors.map((adv) => adv.facultyId).join(', ')}
+                            </div>
+                            <div style={{ fontSize: '0.75rem', color: 'var(--color-error)', marginTop: '2px' }}>
+                              HOD final assignment required to resolve.
+                            </div>
+                          </div>
+                        ) : primaryAdvisor ? (
+                          <div>
+                            <div style={{ fontWeight: 600, color: 'var(--color-on-surface)' }}>
+                              {facultyMatch?.facultyName || primaryAdvisor.facultyId}
+                            </div>
+                            <div style={{ fontSize: '0.75rem', color: 'var(--color-outline)' }}>
+                              ID: {primaryAdvisor.facultyId} {facultyMatch?.designation ? `• ${facultyMatch.designation}` : ''}
+                            </div>
+                          </div>
+                        ) : (
+                          <span style={{ color: 'var(--color-warning)', fontWeight: 600, fontSize: '0.8125rem' }}>
+                            [REQUIRES HOD APPOINTMENT]
+                          </span>
+                        )}
+                      </td>
+                      <td style={{ padding: '12px 16px' }}>
+                        {isConflict ? (
+                          <Badge variant="danger">CONFLICT</Badge>
+                        ) : primaryAdvisor ? (
+                          <Badge variant="success">ASSIGNED</Badge>
+                        ) : (
+                          <Badge variant="warning">UNASSIGNED</Badge>
+                        )}
                       </td>
                       <td style={{ padding: '12px 16px', textAlign: 'right' }}>
-                        {adv.status === 'ACTIVE' && (
+                        <div style={{ display: 'inline-flex', gap: '6px' }}>
                           <Button
-                            variant="danger"
+                            variant={primaryAdvisor ? 'outline' : 'primary'}
                             size="sm"
-                            onClick={() => handleDeactivate(adv._id, fac?.facultyName || adv.facultyId)}
+                            onClick={() => handleOpenAssignModal(target)}
                           >
-                            Deactivate
+                            {primaryAdvisor ? 'Reassign' : 'Appoint Advisor'}
                           </Button>
-                        )}
+                          {primaryAdvisor && (
+                            <Button
+                              variant="danger"
+                              size="sm"
+                              onClick={() => handleDeactivate(primaryAdvisor._id, facultyMatch?.facultyName || primaryAdvisor.facultyId)}
+                              title="Deactivate Advisor"
+                            >
+                              Deactivate
+                            </Button>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   );
@@ -219,61 +345,51 @@ export default function ClassAdvisorPage() {
         )}
       </Card>
 
-      {/* Appointment Modal */}
-      {isModalOpen && (
+      {/* Class Advisor Appointment Modal */}
+      {isModalOpen && activeTargetCohort && (
         <Modal
-          isOpen={isModalOpen}
+          isOpen={true}
           onClose={() => !assigning && setIsModalOpen(false)}
-          title="Appoint Class Advisor"
+          title={`Appoint Class Advisor — ${activeTargetCohort.year} Section ${activeTargetCohort.section}`}
         >
-          <form onSubmit={handleAssign}>
+          <form onSubmit={handleAssignSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '14px', fontSize: '0.875rem' }}>
             {formValidation && (
-              <div style={{ padding: '10px 14px', borderRadius: 'var(--radius-md)', backgroundColor: 'rgba(239, 68, 68, 0.1)', color: 'var(--color-error)', fontSize: '0.8125rem', marginBottom: '14px' }}>
+              <div style={{ padding: '8px 12px', background: 'var(--color-error-container)', color: 'var(--color-on-error-container)', borderRadius: '6px', fontSize: '0.8125rem' }}>
                 {formValidation}
               </div>
             )}
 
-            <div style={{ marginBottom: '14px' }}>
-              <label style={{ display: 'block', fontSize: '0.8125rem', fontWeight: 600, marginBottom: '6px' }}>
-                Academic Cohort (Class & Section)
-              </label>
-              <select
-                value={selectedContextId}
-                onChange={(e) => setSelectedContextId(e.target.value)}
-                className="form-select"
-                style={{ width: '100%', padding: '8px 10px', borderRadius: 'var(--radius-md)', border: '1px solid var(--color-outline-variant)' }}
-              >
-                {contexts.map((c) => (
-                  <option key={c._id} value={c._id}>
-                    {c.department || 'CSE'} - {c.year} &apos;{c.section}&apos; ({c.academicYear})
-                  </option>
-                ))}
-              </select>
+            <div style={{ padding: '10px 12px', background: 'var(--color-surface-container-low)', borderRadius: '6px' }}>
+              <div style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--color-outline)' }}>TARGET CLASS</div>
+              <div style={{ fontWeight: 700, color: 'var(--color-primary)', marginTop: '2px' }}>
+                Computer Science & Engineering — {activeTargetCohort.year} (Section {activeTargetCohort.section})
+              </div>
+              <div style={{ fontSize: '0.75rem', color: 'var(--color-on-surface-variant)', marginTop: '2px' }}>
+                Academic Year 2026-27 • Odd Semester
+              </div>
             </div>
 
-            <div style={{ marginBottom: '20px' }}>
-              <label style={{ display: 'block', fontSize: '0.8125rem', fontWeight: 600, marginBottom: '6px' }}>
-                Faculty Member
+            <div>
+              <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, marginBottom: '6px' }}>
+                Select Faculty Member to Appoint as Class Advisor *
               </label>
-              <select
+              <Select
                 value={selectedFacultyId}
                 onChange={(e) => setSelectedFacultyId(e.target.value)}
-                className="form-select"
-                style={{ width: '100%', padding: '8px 10px', borderRadius: 'var(--radius-md)', border: '1px solid var(--color-outline-variant)' }}
-              >
-                {facultyList.map((f) => (
-                  <option key={f.facultyId} value={f.facultyId}>
-                    {f.facultyId}: {f.facultyName} ({f.designation})
-                  </option>
-                ))}
-              </select>
+                options={facultyList.map((f) => ({
+                  value: f.facultyId,
+                  label: `${f.facultyName} (${f.facultyId}) — ${f.designation}`,
+                }))}
+                required
+                disabled={assigning}
+              />
             </div>
 
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '16px' }}>
               <Button
                 type="button"
                 variant="outline"
-                size="md"
+                size="sm"
                 onClick={() => setIsModalOpen(false)}
                 disabled={assigning}
               >
@@ -282,10 +398,10 @@ export default function ClassAdvisorPage() {
               <Button
                 type="submit"
                 variant="primary"
-                size="md"
+                size="sm"
                 disabled={assigning}
               >
-                {assigning ? 'Appointing...' : 'Confirm Appointment'}
+                {assigning ? 'Assigning...' : 'Appoint Class Advisor'}
               </Button>
             </div>
           </form>

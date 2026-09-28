@@ -10,6 +10,8 @@ import { getTimetableVersions } from '../../services/timetableService';
 import { getAcademicContexts } from '../../services/academicContextService';
 import { getCourses } from '../../services/courseService';
 import { getFacultyList } from '../../services/facultyService';
+import { getHODAllocations } from '../../services/hodAllocationService';
+
 import PageHeader from '../../components/common/PageHeader';
 import Breadcrumbs from '../../components/layout/Breadcrumbs';
 import Card from '../../components/common/Card';
@@ -27,6 +29,7 @@ export default function OptimizationSolverPage() {
   const [contexts, setContexts] = useState([]);
   const [courses, setCourses] = useState([]);
   const [facultyList, setFacultyList] = useState([]);
+  const [hodAllocations, setHodAllocations] = useState([]);
 
   // Create Version State
   const [isVersionModalOpen, setIsVersionModalOpen] = useState(false);
@@ -51,38 +54,71 @@ export default function OptimizationSolverPage() {
     try {
       setLoading(true);
       setError(null);
-      const [verRes, ctxRes, crsRes, facRes] = await Promise.allSettled([
+      const [verRes, ctxRes, crsRes, facRes, hodRes] = await Promise.allSettled([
         getTimetableVersions(),
         getAcademicContexts(),
         getCourses(),
         getFacultyList({ limit: 100 }),
+        getHODAllocations(),
       ]);
 
       if (verRes.status === 'fulfilled' && verRes.value) {
         const list = Array.isArray(verRes.value) ? verRes.value : verRes.value.data || [];
         setVersions(list);
       }
+
+      let allocList = [];
+      if (hodRes.status === 'fulfilled' && hodRes.value) {
+        allocList = Array.isArray(hodRes.value) ? hodRes.value : hodRes.value.data || [];
+        setHodAllocations(allocList);
+      }
+
+      let ctxList = [];
       if (ctxRes.status === 'fulfilled' && ctxRes.value) {
-        const list = Array.isArray(ctxRes.value) ? ctxRes.value : ctxRes.value.data || [];
-        setContexts(list);
-        if (list.length > 0) {
-          setSelectedContextId(list[0]._id);
-          setSessionForm((prev) => ({ ...prev, academicContextId: list[0]._id }));
+        ctxList = Array.isArray(ctxRes.value) ? ctxRes.value : ctxRes.value.data || [];
+        setContexts(ctxList);
+        if (ctxList.length > 0) {
+          const firstCtxId = ctxList[0]._id;
+          setSelectedContextId(firstCtxId);
+
+          const cohortAllocs = allocList.filter(
+            (a) => (a.academicContextId?._id || a.academicContextId) === firstCtxId
+          );
+
+          if (cohortAllocs.length > 0) {
+            setSessionForm((prev) => ({
+              ...prev,
+              academicContextId: firstCtxId,
+              courseCode: cohortAllocs[0].courseCode,
+              facultyId: cohortAllocs[0].facultyId?._id || cohortAllocs[0].facultyId,
+              sessionType: cohortAllocs[0].allocationType || 'THEORY',
+            }));
+          } else {
+            setSessionForm((prev) => ({ ...prev, academicContextId: firstCtxId }));
+          }
         }
       }
+
       if (crsRes.status === 'fulfilled' && crsRes.value) {
         const list = Array.isArray(crsRes.value) ? crsRes.value : crsRes.value.data || [];
         setCourses(list);
-        if (list.length > 0) {
-          setSessionForm((prev) => ({ ...prev, courseCode: list[0].courseCode }));
-        }
+        setSessionForm((prev) => {
+          if (!prev.courseCode && list.length > 0) {
+            return { ...prev, courseCode: list[0].courseCode };
+          }
+          return prev;
+        });
       }
+
       if (facRes.status === 'fulfilled' && facRes.value) {
         const list = facRes.value.items || facRes.value.data || (Array.isArray(facRes.value) ? facRes.value : []);
         setFacultyList(list);
-        if (list.length > 0) {
-          setSessionForm((prev) => ({ ...prev, facultyId: list[0].facultyId }));
-        }
+        setSessionForm((prev) => {
+          if (!prev.facultyId && list.length > 0) {
+            return { ...prev, facultyId: list[0].facultyId };
+          }
+          return prev;
+        });
       }
     } catch (err) {
       console.error('[OptimizationSolverPage] Failed to fetch:', err);
@@ -117,6 +153,51 @@ export default function OptimizationSolverPage() {
       showToast(err.message || 'Failed to initialize version.', 'error');
     } finally {
       setCreatingVersion(false);
+    }
+  };
+
+  const handleCohortChange = (newContextId) => {
+    const cohortAllocs = hodAllocations.filter(
+      (a) => (a.academicContextId?._id || a.academicContextId) === newContextId
+    );
+    let newCourse = courses[0]?.courseCode || '';
+    let newFaculty = facultyList[0]?.facultyId || '';
+    let newType = 'THEORY';
+
+    if (cohortAllocs.length > 0) {
+      newCourse = cohortAllocs[0].courseCode;
+      newFaculty = cohortAllocs[0].facultyId?._id || cohortAllocs[0].facultyId;
+      newType = cohortAllocs[0].allocationType || 'THEORY';
+    }
+
+    setSessionForm((prev) => ({
+      ...prev,
+      academicContextId: newContextId,
+      courseCode: newCourse,
+      facultyId: newFaculty,
+      sessionType: newType,
+    }));
+  };
+
+  const handleCourseChange = (newCourseCode) => {
+    const match = hodAllocations.find(
+      (a) =>
+        (a.academicContextId?._id || a.academicContextId) === sessionForm.academicContextId &&
+        a.courseCode === newCourseCode
+    );
+
+    if (match) {
+      setSessionForm((prev) => ({
+        ...prev,
+        courseCode: newCourseCode,
+        facultyId: match.facultyId?._id || match.facultyId,
+        sessionType: match.allocationType || prev.sessionType,
+      }));
+    } else {
+      setSessionForm((prev) => ({
+        ...prev,
+        courseCode: newCourseCode,
+      }));
     }
   };
 
@@ -161,6 +242,11 @@ export default function OptimizationSolverPage() {
       setSubmittingVersionId(null);
     }
   };
+
+  const cohortAllocs = hodAllocations.filter(
+    (a) => (a.academicContextId?._id || a.academicContextId) === sessionForm.academicContextId
+  );
+  const matchingAlloc = cohortAllocs.find((a) => a.courseCode === sessionForm.courseCode);
 
   return (
     <div>
@@ -401,13 +487,13 @@ export default function OptimizationSolverPage() {
               </label>
               <select
                 value={sessionForm.academicContextId}
-                onChange={(e) => setSessionForm({ ...sessionForm, academicContextId: e.target.value })}
+                onChange={(e) => handleCohortChange(e.target.value)}
                 className="form-select"
                 style={{ width: '100%', padding: '8px 10px', borderRadius: 'var(--radius-md)', border: '1px solid var(--color-outline-variant)' }}
               >
                 {contexts.map((c) => (
                   <option key={c._id} value={c._id}>
-                    {c.department || 'CSE'} - {c.year} &apos;{c.section}&apos;
+                    {c.department || 'CSE'} - {c.year} &apos;{c.section}&apos; (Sem {c.semester || 'ODD'})
                   </option>
                 ))}
               </select>
@@ -450,36 +536,76 @@ export default function OptimizationSolverPage() {
             </div>
 
             <div style={{ marginBottom: '14px' }}>
-              <label style={{ display: 'block', fontSize: '0.8125rem', fontWeight: 600, marginBottom: '6px' }}>Course</label>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                <label style={{ fontSize: '0.8125rem', fontWeight: 600 }}>Course</label>
+                {cohortAllocs.length > 0 && (
+                  <Badge variant="success">{cohortAllocs.length} HOD Allocated</Badge>
+                )}
+              </div>
               <select
                 value={sessionForm.courseCode}
-                onChange={(e) => setSessionForm({ ...sessionForm, courseCode: e.target.value })}
+                onChange={(e) => handleCourseChange(e.target.value)}
                 className="form-select"
                 style={{ width: '100%', padding: '8px 10px', borderRadius: 'var(--radius-md)', border: '1px solid var(--color-outline-variant)' }}
               >
-                {courses.map((crs) => (
-                  <option key={crs.courseCode} value={crs.courseCode}>
-                    {crs.courseCode}: {crs.courseName}
-                  </option>
-                ))}
+                {cohortAllocs.length > 0 && (
+                  <optgroup label="HOD Allocated Courses (Authoritative)">
+                    {cohortAllocs.map((alloc) => (
+                      <option key={alloc.courseCode} value={alloc.courseCode}>
+                        {alloc.courseCode}: {alloc.courseName || alloc.courseCode} ({alloc.facultyName || alloc.facultyId})
+                      </option>
+                    ))}
+                  </optgroup>
+                )}
+                <optgroup label="Other Curriculum Courses">
+                  {courses
+                    .filter((crs) => !cohortAllocs.some((a) => a.courseCode === crs.courseCode))
+                    .map((crs) => (
+                      <option key={crs.courseCode} value={crs.courseCode}>
+                        {crs.courseCode}: {crs.courseName}
+                      </option>
+                    ))}
+                </optgroup>
               </select>
             </div>
 
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '20px' }}>
               <div>
-                <label style={{ display: 'block', fontSize: '0.8125rem', fontWeight: 600, marginBottom: '6px' }}>Faculty</label>
-                <select
-                  value={sessionForm.facultyId}
-                  onChange={(e) => setSessionForm({ ...sessionForm, facultyId: e.target.value })}
-                  className="form-select"
-                  style={{ width: '100%', padding: '8px 10px', borderRadius: 'var(--radius-md)', border: '1px solid var(--color-outline-variant)' }}
-                >
-                  {facultyList.map((f) => (
-                    <option key={f.facultyId} value={f.facultyId}>
-                      {f.facultyId}: {f.facultyName}
-                    </option>
-                  ))}
-                </select>
+                <label style={{ display: 'block', fontSize: '0.8125rem', fontWeight: 600, marginBottom: '6px' }}>
+                  Faculty Instructor
+                </label>
+                {matchingAlloc ? (
+                  <div style={{ padding: '8px 10px', backgroundColor: 'var(--color-surface-container-low)', borderRadius: 'var(--radius-md)', border: '1px solid var(--color-success)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <div>
+                      <div style={{ fontWeight: 600, color: 'var(--color-primary)', fontSize: '0.875rem' }}>
+                        {matchingAlloc.facultyName || matchingAlloc.facultyId}
+                      </div>
+                      <div style={{ fontSize: '0.75rem', color: 'var(--color-outline)' }}>
+                        ID: {matchingAlloc.facultyId?._id || matchingAlloc.facultyId}
+                      </div>
+                    </div>
+                    <Badge variant="success">HOD ALLOCATED</Badge>
+                  </div>
+                ) : (
+                  <div>
+                    <select
+                      value={sessionForm.facultyId}
+                      onChange={(e) => setSessionForm({ ...sessionForm, facultyId: e.target.value })}
+                      className="form-select"
+                      style={{ width: '100%', padding: '8px 10px', borderRadius: 'var(--radius-md)', border: '1px solid var(--color-warning)' }}
+                    >
+                      <option value="">-- Select Instructor --</option>
+                      {facultyList.map((f) => (
+                        <option key={f.facultyId} value={f.facultyId}>
+                          {f.facultyId}: {f.facultyName}
+                        </option>
+                      ))}
+                    </select>
+                    <div style={{ marginTop: '4px', fontSize: '0.75rem', color: 'var(--color-warning-dark)' }}>
+                      ⚠️ No HOD allocation for this course. [REQUIRES HOD DECISION]
+                    </div>
+                  </div>
+                )}
               </div>
 
               <div>
