@@ -14,35 +14,37 @@ import ProtectedRoute from './ProtectedRoute';
 import LoginPage from '../pages/auth/LoginPage';
 import AccessDenied from '../pages/common/AccessDenied';
 
-// Faculty Portal Pages (Phase 3)
+// Faculty Portal Pages
 import FacultyDashboard from '../pages/faculty/FacultyDashboard';
-import MyTimetablePage from '../pages/faculty/MyTimetablePage';
-import WeeklyTimetablePage from '../pages/faculty/WeeklyTimetablePage';
+import ClassTimetablePage from '../pages/faculty/ClassTimetablePage';
+import FacultyTimetablePage from '../pages/faculty/FacultyTimetablePage';
 import FacultyWorkloadPage from '../pages/faculty/FacultyWorkloadPage';
 import FacultyAvailabilityPage from '../pages/faculty/FacultyAvailabilityPage';
 import FacultyAbsencePage from '../pages/faculty/FacultyAbsencePage';
 import FacultyNotificationsPage from '../pages/faculty/FacultyNotificationsPage';
 import FacultyProfilePage from '../pages/faculty/FacultyProfilePage';
 
-// Coordinator Portal Pages (Phase 4)
+// Coordinator Portal Pages
 import CoordinatorDashboard from '../pages/coordinator/CoordinatorDashboard';
+import OptimizationSolverPage from '../pages/coordinator/OptimizationSolverPage';
 import CourseSelectionPage from '../pages/coordinator/CourseSelectionPage';
 import FacultyAssignmentPage from '../pages/coordinator/FacultyAssignmentPage';
+import FreeTimetableMappingPage from '../pages/coordinator/FreeTimetableMappingPage';
 import ConflictDetectionPage from '../pages/coordinator/ConflictDetectionPage';
 import ValidationRulesPage from '../pages/coordinator/ValidationRulesPage';
-import OptimizationSolverPage from '../pages/coordinator/OptimizationSolverPage';
 import CoordinatorNotificationsPage from '../pages/coordinator/CoordinatorNotificationsPage';
 
-// HOD Portal Pages (Phase 5)
+// HOD Portal Pages
 import HODDashboard from '../pages/hod/HODDashboard';
 import FacultyListPage from '../pages/hod/FacultyListPage';
 import AddFacultyPage from '../pages/hod/AddFacultyPage';
+import RegulationPage from '../pages/hod/RegulationPage';
+import ClassAdvisorPage from '../pages/hod/ClassAdvisorPage';
 import AcademicContextPage from '../pages/hod/AcademicContextPage';
 import HODFacultyAllocationPage from '../pages/hod/HODFacultyAllocationPage';
 import AllocationReviewPage from '../pages/hod/AllocationReviewPage';
 import TimetableReviewPage from '../pages/hod/TimetableReviewPage';
 import TimetableApprovalPage from '../pages/hod/TimetableApprovalPage';
-import ClassAdvisorPage from '../pages/hod/ClassAdvisorPage';
 import FacultyInputReviewPage from '../pages/hod/FacultyInputReviewPage';
 import HODNotificationsPage from '../pages/hod/HODNotificationsPage';
 import HODProfilePage from '../pages/hod/HODProfilePage';
@@ -65,8 +67,15 @@ export default function AppRoutes() {
         <Route path="/faculty" element={<FacultyLayout />}>
           <Route index element={<Navigate to="/faculty/dashboard" replace />} />
           <Route path="dashboard" element={<FacultyDashboard />} />
-          <Route path="timetable" element={<MyTimetablePage />} />
-          <Route path="weekly-timetable" element={<WeeklyTimetablePage />} />
+          
+          {/* Exactly TWO distinct timetable views */}
+          <Route path="class-timetable" element={<ClassTimetablePage />} />
+          <Route path="faculty-timetable" element={<FacultyTimetablePage />} />
+          
+          {/* Backwards-compatible aliases */}
+          <Route path="timetable" element={<Navigate to="/faculty/faculty-timetable" replace />} />
+          <Route path="weekly-timetable" element={<Navigate to="/faculty/class-timetable" replace />} />
+
           <Route path="workload" element={<FacultyWorkloadPage />} />
           <Route path="availability" element={<FacultyAvailabilityPage />} />
           <Route path="absence" element={<FacultyAbsencePage />} />
@@ -80,12 +89,23 @@ export default function AppRoutes() {
         <Route path="/coordinator" element={<CoordinatorLayout />}>
           <Route index element={<Navigate to="/coordinator/dashboard" replace />} />
           <Route path="dashboard" element={<CoordinatorDashboard />} />
-          <Route path="context" element={<AcademicContextPage portalType="Coordinator" />} />
-          <Route path="course-selection" element={<CourseSelectionPage />} />
+          
+          {/* Timetable Design and Viewing */}
+          <Route path="design" element={<OptimizationSolverPage />} />
+          <Route path="view" element={<TimetableReviewPage portalType="Coordinator" />} />
+          
+          {/* Faculty / Course Allocation */}
           <Route path="faculty-assignment" element={<FacultyAssignmentPage />} />
+          <Route path="course-selection" element={<CourseSelectionPage />} />
+          
+          {/* Free Timetable / Substitute Mapping */}
+          <Route path="free-mapping" element={<FreeTimetableMappingPage />} />
+          
+          {/* Rules & Audits */}
           <Route path="conflict" element={<ConflictDetectionPage />} />
           <Route path="validation" element={<ValidationRulesPage />} />
-          <Route path="optimization" element={<OptimizationSolverPage />} />
+          <Route path="context" element={<AcademicContextPage portalType="Coordinator" />} />
+          <Route path="optimization" element={<Navigate to="/coordinator/design" replace />} />
           <Route path="notifications" element={<CoordinatorNotificationsPage />} />
         </Route>
       </Route>
@@ -95,14 +115,27 @@ export default function AppRoutes() {
         <Route path="/hod" element={<HODLayout />}>
           <Route index element={<Navigate to="/hod/dashboard" replace />} />
           <Route path="dashboard" element={<HODDashboard />} />
+          
+          {/* Faculty Management */}
           <Route path="faculty" element={<FacultyListPage />} />
           <Route path="faculty/add" element={<AddFacultyPage />} />
-          <Route path="context" element={<AcademicContextPage portalType="HOD" />} />
+          
+          {/* Regulation Management */}
+          <Route path="regulation" element={<RegulationPage />} />
+          
+          {/* Class Advisor Management */}
+          <Route path="class-advisor" element={<ClassAdvisorPage />} />
+          
+          {/* Timetable Management & Review */}
+          <Route path="timetable-review" element={<TimetableReviewPage />} />
           <Route path="faculty-allocation" element={<HODFacultyAllocationPage />} />
           <Route path="allocation-review" element={<AllocationReviewPage />} />
-          <Route path="timetable-review" element={<TimetableReviewPage />} />
+          
+          {/* Approval of Coordinator-Designed Timetable */}
           <Route path="approval" element={<TimetableApprovalPage />} />
-          <Route path="class-advisor" element={<ClassAdvisorPage />} />
+          
+          {/* Supporting Executive Context & Reviews */}
+          <Route path="context" element={<AcademicContextPage portalType="HOD" />} />
           <Route path="faculty-input" element={<FacultyInputReviewPage />} />
           <Route path="notifications" element={<HODNotificationsPage />} />
           <Route path="profile" element={<HODProfilePage />} />

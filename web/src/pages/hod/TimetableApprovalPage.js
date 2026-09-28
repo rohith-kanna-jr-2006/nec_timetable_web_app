@@ -60,13 +60,14 @@ export default function TimetableApprovalPage() {
   return (
     <div>
       <PageHeader
-        title="Timetable State Ratification"
-        description="Formal statutory approval desk for transitioning timetable versions (Pending HOD Approval -> Approved -> Published)."
+        title="Timetable Approval"
+        description="Executive desk for reviewing Coordinator-designed timetable versions and executing HOD approval or rejection."
         breadcrumbs={[
           { label: 'HOD Portal', path: '/hod/dashboard' },
-          { label: 'State Ratification' },
+          { label: 'Timetable Approval' },
         ]}
-        badge={<Badge variant="warning">STATUTORY RATIFICATION</Badge>}
+        badge={<Badge variant="warning">HOD APPROVAL DESK</Badge>}
+
         actions={
           <Button variant="outline" size="sm" icon="🔄" onClick={loadVersions}>
             Refresh Versions

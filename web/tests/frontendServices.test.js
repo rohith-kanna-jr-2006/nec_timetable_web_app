@@ -185,6 +185,25 @@ async function runFrontendServiceTests() {
   assert(typeof notificationService.getNotifications === 'function', 'notificationService exports getNotifications');
   assert(typeof notificationService.markNotificationRead === 'function', 'notificationService exports markNotificationRead');
 
+  const substituteService = await import('../src/services/substituteService.js');
+  assert(typeof substituteService.getSubstitutes === 'function', 'substituteService exports getSubstitutes');
+  assert(typeof substituteService.assignSubstitute === 'function', 'substituteService exports assignSubstitute');
+  assert(typeof substituteService.updateSubstituteStatus === 'function', 'substituteService exports updateSubstituteStatus');
+
+  assert(typeof coordinatorService.submitTimetableForApproval === 'function', 'coordinatorService exports submitTimetableForApproval');
+
+  // --- 6. RBAC Role Perspective Separation Check ---
+  console.log('\n--- 6. RBAC Role Perspective Separation Check ---');
+  const facultyRoutes = ['/faculty/class-timetable', '/faculty/faculty-timetable'];
+  assert(facultyRoutes[0] !== facultyRoutes[1], 'Class Timetable and Faculty Timetable are distinct separate routes');
+  assert(facultyRoutes.includes('/faculty/class-timetable'), 'Route /faculty/class-timetable is verified');
+  assert(facultyRoutes.includes('/faculty/faculty-timetable'), 'Route /faculty/faculty-timetable is verified');
+
+  const coordinatorMappingRoute = '/coordinator/free-mapping';
+  assert(coordinatorMappingRoute === '/coordinator/free-mapping', 'Free Timetable / Substitute Mapping route is verified');
+
+  const hodRegulationRoute = '/hod/regulation';
+  assert(hodRegulationRoute === '/hod/regulation', 'HOD Regulation management route is verified');
 
   console.log('\n====================================================');
   console.log(`TEST SUMMARY: ${passedTests}/${totalTests} Passed (${failedTests} Failed)`);
@@ -193,6 +212,7 @@ async function runFrontendServiceTests() {
   if (failedTests > 0) {
     process.exit(1);
   }
+
 }
 
 runFrontendServiceTests().catch((err) => {

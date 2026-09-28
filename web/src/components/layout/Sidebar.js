@@ -17,26 +17,20 @@ export default function Sidebar({
       case 'AC':
         return [
           {
-            title: 'OPERATIONAL DESK',
+            title: 'TIMETABLE OPERATIONS',
             items: [
               { label: 'Dashboard', path: '/coordinator/dashboard', icon: '📊' },
-              { label: 'Academic Context', path: '/coordinator/context', icon: '🏛️' },
-              { label: 'Course Selection', path: '/coordinator/course-selection', icon: '📚' },
+              { label: 'Timetable Design', path: '/coordinator/design', icon: '⚡' },
+              { label: 'Timetable View', path: '/coordinator/view', icon: '📅' },
+              { label: 'Faculty & Course Allocation', path: '/coordinator/faculty-assignment', icon: '👥' },
             ],
           },
           {
-            title: 'TIMETABLE SCHEDULING',
+            title: 'MAPPING & SUBSTITUTION',
             items: [
-              { label: 'Faculty Assignment', path: '/coordinator/faculty-assignment', icon: '👥' },
+              { label: 'Free Timetable / Substitute Mapping', path: '/coordinator/free-mapping', icon: '🔄' },
               { label: 'Conflict Detection', path: '/coordinator/conflict', icon: '⚠️' },
               { label: 'Validation Rules', path: '/coordinator/validation', icon: '✓' },
-              { label: 'Optimization Solver', path: '/coordinator/optimization', icon: '⚡' },
-            ],
-          },
-          {
-            title: 'COMMUNICATIONS',
-            items: [
-              { label: 'Notifications', path: '/coordinator/notifications', icon: '🔔' },
             ],
           },
         ];
@@ -44,30 +38,20 @@ export default function Sidebar({
       case 'HOD':
         return [
           {
-            title: 'STATUTORY EXECUTIVE',
+            title: 'HOD EXECUTIVE',
             items: [
-              { label: 'Executive Dashboard', path: '/hod/dashboard', icon: '🏛️' },
-              { label: 'Faculty Directory', path: '/hod/faculty', icon: '👥' },
-              { label: 'Add New Faculty', path: '/hod/faculty/add', icon: '➕' },
-              { label: 'Academic Context', path: '/hod/context', icon: '📋' },
+              { label: 'Dashboard', path: '/hod/dashboard', icon: '📊' },
+              { label: 'Faculty Management', path: '/hod/faculty', icon: '👥' },
+              { label: 'Regulation', path: '/hod/regulation', icon: '📜' },
+              { label: 'Class Advisor', path: '/hod/class-advisor', icon: '🎓' },
             ],
           },
           {
-            title: 'GOVERNANCE & APPROVAL',
+            title: 'TIMETABLE & APPROVAL',
             items: [
+              { label: 'Timetable', path: '/hod/timetable-review', icon: '📅' },
               { label: 'Faculty Allocation', path: '/hod/faculty-allocation', icon: '📝' },
-              { label: 'Allocation Review', path: '/hod/allocation-review', icon: '🔎' },
-              { label: 'Class Timetable Review', path: '/hod/timetable-review', icon: '📅' },
-              { label: 'State Ratification', path: '/hod/approval', icon: '🛡️', badge: 'Action' },
-            ],
-          },
-          {
-            title: 'FACULTY & ADVISORY',
-            items: [
-              { label: 'Class Advisors', path: '/hod/class-advisor', icon: '🎓' },
-              { label: 'Faculty Inputs', path: '/hod/faculty-input', icon: '📬' },
-              { label: 'Alerts & Messages', path: '/hod/notifications', icon: '🔔' },
-              { label: 'Executive Profile', path: '/hod/profile', icon: '👤' },
+              { label: 'Approval', path: '/hod/approval', icon: '🛡️', badge: 'Review' },
             ],
           },
         ];
@@ -76,18 +60,18 @@ export default function Sidebar({
       default:
         return [
           {
-            title: 'TEACHING & SCHEDULE',
+            title: 'TIMETABLES',
             items: [
-              { label: 'Faculty Dashboard', path: '/faculty/dashboard', icon: '📊' },
-              { label: 'My Timetable', path: '/faculty/timetable', icon: '🗓️' },
-              { label: 'Weekly Grid Matrix', path: '/faculty/weekly-timetable', icon: '📅' },
-              { label: 'Workload Norms', path: '/faculty/workload', icon: '⚖️' },
+              { label: 'Class Timetable', path: '/faculty/class-timetable', icon: '🏫' },
+              { label: 'Faculty Timetable', path: '/faculty/faculty-timetable', icon: '🗓️' },
             ],
           },
           {
-            title: 'SERVICES & AVAILABILITY',
+            title: 'FACULTY SERVICES',
             items: [
-              { label: 'Availability / Prefs', path: '/faculty/availability', icon: '🕒' },
+              { label: 'Dashboard', path: '/faculty/dashboard', icon: '📊' },
+              { label: 'Workload Norms', path: '/faculty/workload', icon: '⚖️' },
+              { label: 'Availability', path: '/faculty/availability', icon: '🕒' },
               { label: 'Absence & Leave', path: '/faculty/absence', icon: '📝' },
               { label: 'Notifications', path: '/faculty/notifications', icon: '🔔' },
               { label: 'Staff Profile', path: '/faculty/profile', icon: '👤' },
@@ -96,6 +80,7 @@ export default function Sidebar({
         ];
     }
   };
+
 
   const getRoleBadge = () => {
     switch (role) {

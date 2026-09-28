@@ -81,6 +81,17 @@ export async function deleteTimetableSession(sessionId) {
   return response?.data || response;
 }
 
+/**
+ * Submit timetable version for HOD Approval
+ * PATCH /api/timetable/version/:id/status
+ */
+export async function submitTimetableForApproval(versionId) {
+  const response = await api.patch(`/timetable/version/${encodeURIComponent(versionId)}/status`, {
+    status: 'PENDING_HOD_APPROVAL',
+  });
+  return response?.data || response;
+}
+
 export default {
   getCourseFacultyHandlers,
   getCourseFacultyHandlerByCourse,
@@ -90,4 +101,7 @@ export default {
   createTimetableVersion,
   createTimetableSession,
   deleteTimetableSession,
+  submitTimetableForApproval,
 };
+
+

@@ -30,8 +30,8 @@ export default function MyTimetablePage() {
   const [selectedDay, setSelectedDay] = useState(() => getCurrentDayId());
   const [currentPeriod, setCurrentPeriod] = useState(() => getCurrentPeriodStatus());
 
-  const [activeFacultyId, setActiveFacultyId] = useState(user?.facultyId || 'FWL-03');
-  const [activeFacultyName, setActiveFacultyName] = useState(user?.name || 'Dr. S. Karpusamy');
+  const [activeFacultyId, setActiveFacultyId] = useState(user?.facultyId || user?.id || '');
+  const [activeFacultyName, setActiveFacultyName] = useState(user?.name || user?.facultyName || 'Faculty Member');
   const [allFaculty, setAllFaculty] = useState([]);
 
   // Fetch faculty list for switcher
