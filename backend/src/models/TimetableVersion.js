@@ -2,6 +2,12 @@ const mongoose = require('mongoose');
 
 const timetableVersionSchema = new mongoose.Schema(
   {
+    academicContextId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'AcademicContext',
+      default: null,
+      index: true,
+    },
     academicYear: {
       type: String,
       required: true,

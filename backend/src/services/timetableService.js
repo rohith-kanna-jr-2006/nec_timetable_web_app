@@ -1,5 +1,6 @@
 const TimetableVersion = require('../models/TimetableVersion');
 const TimetableSession = require('../models/TimetableSession');
+const AcademicContext = require('../models/AcademicContext');
 const { buildSchedulingContext } = require('./timetable/constraintBuilder');
 const { solveTimetable } = require('./timetable/timetableSolver');
 
@@ -137,12 +138,59 @@ async function getFacultySchedule(facultyId, versionId = null) {
 
 /**
  * Retrieves timetable sessions for an academic context (class).
+ * Strictly binds to the specified versionId or the latest authoritative
+ * (PUBLISHED > APPROVED > GENERATED > DRAFT) version for this academicContext.
  */
 async function getClassSchedule(academicContextId, versionId = null) {
-  const filter = { academicContextId };
-  if (versionId) {
-    filter.timetableVersionId = versionId;
+  let targetVersionId = versionId;
+
+  if (!targetVersionId) {
+    const context = await AcademicContext.findById(academicContextId);
+    if (context) {
+      const versionQuery = {
+        $or: [
+          { academicContextId: context._id },
+          {
+            department: context.department,
+            academicYear: context.academicYear,
+            semester: context.semester,
+            year: context.year,
+            section: context.section,
+          },
+        ],
+      };
+
+      // Prioritize PUBLISHED version first
+      let version = await TimetableVersion.findOne({
+        ...versionQuery,
+        status: 'PUBLISHED',
+      }).sort({ publishedAt: -1, updatedAt: -1 });
+
+      if (!version) {
+        // Fallback to APPROVED, GENERATED, or DRAFT
+        version = await TimetableVersion.findOne({
+          ...versionQuery,
+          status: { $in: ['APPROVED', 'GENERATED', 'DRAFT'] },
+        }).sort({ updatedAt: -1 });
+      }
+
+      if (version) {
+        targetVersionId = version._id;
+      }
+    } else {
+      // If context document not loaded directly, check if version exists for this academicContextId
+      const version = await TimetableVersion.findOne({ academicContextId }).sort({ updatedAt: -1 });
+      if (version) {
+        targetVersionId = version._id;
+      }
+    }
   }
+
+  const filter = { academicContextId };
+  if (targetVersionId) {
+    filter.timetableVersionId = targetVersionId;
+  }
+
   return TimetableSession.find(filter).sort({ day: 1, period: 1 });
 }
 

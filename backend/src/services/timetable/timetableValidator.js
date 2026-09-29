@@ -236,6 +236,55 @@ function validateGeneratedSchedule(assignments, problemSpec) {
     }
   }
 
+  // 10. Check: Course identity, canonical course name, sessionType and duration validity
+  const ALLOWED_SESSION_TYPES = ['THEORY', 'LAB', 'SAS', 'PBL', 'TUTORIAL', 'OTHER'];
+  const reqMap = new Map();
+  if (resolvedRequirements) {
+    resolvedRequirements.forEach((r) => reqMap.set(r.courseCode, r));
+  }
+
+  for (const s of assignments) {
+    // Valid sessionType
+    if (s.sessionType && !ALLOWED_SESSION_TYPES.includes(s.sessionType)) {
+      errors.push({
+        code: 'INVALID_SESSION_TYPE',
+        session: s,
+        message: `Session '${s.courseCode}' on ${s.day} ${s.period} has invalid sessionType '${s.sessionType}'.`,
+      });
+    }
+
+    // Valid duration
+    if (s.duration !== undefined && (typeof s.duration !== 'number' || s.duration < 1)) {
+      errors.push({
+        code: 'INVALID_DURATION',
+        session: s,
+        message: `Session '${s.courseCode}' on ${s.day} ${s.period} has invalid duration '${s.duration}'.`,
+      });
+    }
+
+    // Course identity against resolvedRequirements
+    if (reqMap.has(s.courseCode)) {
+      const req = reqMap.get(s.courseCode);
+      if (s.courseName && req.courseName && s.courseName.trim() !== req.courseName.trim()) {
+        errors.push({
+          code: 'COURSE_NAME_MISMATCH',
+          session: s,
+          expectedName: req.courseName,
+          receivedName: s.courseName,
+          message: `Session for '${s.courseCode}' has mutated courseName '${s.courseName}'. Authoritative: '${req.courseName}'.`,
+        });
+      }
+    } else if (resolvedRequirements && resolvedRequirements.length > 0) {
+      // Course is not among the authorized requirements for this generation run
+      errors.push({
+        code: 'UNAUTHORIZED_COURSE',
+        courseCode: s.courseCode,
+        session: s,
+        message: `Course '${s.courseCode}' is not an authorized course in the scheduling requirement plan.`,
+      });
+    }
+  }
+
   const isValid = errors.length === 0;
 
   return {
@@ -249,6 +298,19 @@ function validateGeneratedSchedule(assignments, problemSpec) {
   };
 }
 
+const {
+  YEAR_TO_SEMESTER,
+  resolveContextSemester,
+  isCurriculumCourse,
+  validateCourseIdentity,
+  validateSessionCourseIntegrity,
+} = require('./courseValidator');
+
 module.exports = {
   validateGeneratedSchedule,
+  YEAR_TO_SEMESTER,
+  resolveContextSemester,
+  isCurriculumCourse,
+  validateCourseIdentity,
+  validateSessionCourseIntegrity,
 };

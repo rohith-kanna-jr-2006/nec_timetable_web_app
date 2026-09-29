@@ -252,6 +252,16 @@ async function createSession(req, res, next) {
       return errorResponse(res, `Course '${normalizedCourseCode}' not found`, 404, 'NOT_FOUND');
     }
 
+    // Verify courseName strictly matches authoritative Course.courseName
+    if (courseName && courseName.trim() !== course.courseName.trim()) {
+      return errorResponse(
+        res,
+        `Course name mismatch for '${normalizedCourseCode}'. Expected '${course.courseName}', but received '${courseName}'.`,
+        400,
+        'COURSE_NAME_MISMATCH'
+      );
+    }
+
     // Verify course belongs to selected academic context / semester
     const yearToSemester = {
       'I YEAR': 'Semester I',
@@ -366,7 +376,7 @@ async function createSession(req, res, next) {
       timetableVersionId: finalVersionId,
       academicContextId: finalContextId,
       courseCode: normalizedCourseCode,
-      courseName: courseName || course.courseName || '',
+      courseName: course.courseName,
       facultyId: submittedFacultyId,
       facultyName: resolvedFacultyName || '',
       day,
