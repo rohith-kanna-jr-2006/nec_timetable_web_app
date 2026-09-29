@@ -1,4 +1,6 @@
 const HODFacultyAllocation = require('../models/HODFacultyAllocation');
+const Course = require('../models/Course');
+const Faculty = require('../models/Faculty');
 const { updateAllocationStatus } = require('../services/allocationService');
 const { successResponse, errorResponse } = require('../utils/responseHandler');
 
@@ -18,9 +20,20 @@ async function getAllocations(req, res, next) {
 
     const allocations = await HODFacultyAllocation.find(query)
       .populate('academicContextId')
-      .sort({ createdAt: -1 });
+      .sort({ createdAt: -1 })
+      .lean();
 
-    return successResponse(res, allocations);
+    const formatted = allocations.map((a) => {
+      const ctx = a.academicContextId;
+      const ctxIdStr = ctx && ctx._id ? ctx._id.toString() : (a.academicContextId ? a.academicContextId.toString() : null);
+      return {
+        ...a,
+        academicContext: ctx,
+        academicContextId: ctxIdStr || a.academicContextId,
+      };
+    });
+
+    return successResponse(res, formatted);
   } catch (error) {
     next(error);
   }
@@ -34,25 +47,57 @@ async function createAllocation(req, res, next) {
   try {
     const { academicContextId, courseCode, courseName, facultyId, facultyName, allocationType, status } = req.body;
 
-    // Default status is DRAFT if created by AC, or SUBMITTED
-    const initialStatus = status || (req.user && req.user.role === 'HOD' ? 'APPROVED' : 'DRAFT');
+    const normalizedCourseCode = courseCode.toUpperCase().trim();
 
-    // If an AC tries to create with APPROVED, reject
+    // Check if an active authoritative allocation already exists for this context + course
+    const existing = await HODFacultyAllocation.findOne({
+      academicContextId,
+      courseCode: normalizedCourseCode,
+      status: { $ne: 'REJECTED' },
+    });
+
+    if (existing) {
+      return errorResponse(
+        res,
+        `An active HOD allocation already exists for course '${normalizedCourseCode}' in this academic context. HOD resolution is required.`,
+        409,
+        'HOD_ALLOCATION_CONFLICT'
+      );
+    }
+
+    // Default status is APPROVED if created by HOD/ADMIN, else DRAFT
+    const initialStatus = status || (req.user && ['HOD', 'ADMIN'].includes(req.user.role) ? 'APPROVED' : 'DRAFT');
+
+    // If an unauthorized role attempts to create with APPROVED, reject
     if (initialStatus === 'APPROVED' && (!req.user || !['HOD', 'ADMIN'].includes(req.user.role))) {
       return errorResponse(
         res,
-        'Academic Coordinator cannot create or approve final HOD allocations. Final approval is reserved for HOD.',
+        'Only HOD has the authority to create approved faculty allocations.',
         403,
         'FORBIDDEN'
       );
     }
 
+    // Auto-resolve courseName if missing
+    let resolvedCourseName = courseName;
+    if (!resolvedCourseName) {
+      const crs = await Course.findOne({ courseCode: normalizedCourseCode });
+      if (crs) resolvedCourseName = crs.courseName;
+    }
+
+    // Auto-resolve facultyName if missing
+    let resolvedFacultyName = facultyName;
+    if (!resolvedFacultyName) {
+      const fac = await Faculty.findOne({ facultyId });
+      if (fac) resolvedFacultyName = fac.facultyName;
+    }
+
     const allocation = await HODFacultyAllocation.create({
       academicContextId,
-      courseCode: courseCode.toUpperCase().trim(),
-      courseName: courseName || '',
+      courseCode: normalizedCourseCode,
+      courseName: resolvedCourseName || '',
       facultyId,
-      facultyName: facultyName || '',
+      facultyName: resolvedFacultyName || '',
       allocationType: allocationType || 'THEORY',
       assignedBy: req.user ? req.user.name || req.user.email : 'HOD',
       status: initialStatus,

@@ -29,9 +29,18 @@ async function transitionTimetableStatus(versionId, targetStatus, user, meta = {
     );
   }
 
-  // Only HOD or ADMIN can approve or publish
-  if (['APPROVED', 'PUBLISHED'].includes(targetStatus) && !['HOD', 'ADMIN'].includes(user.role)) {
+  // Only HOD or ADMIN can approve, reject, or publish
+  if (['APPROVED', 'PUBLISHED', 'REJECTED'].includes(targetStatus) && !['HOD', 'ADMIN'].includes(user.role)) {
     throw new Error(`Only HOD has authority to transition timetable to ${targetStatus}.`);
+  }
+
+  // AC cannot review or transition from PENDING_HOD_APPROVAL
+  if (currentStatus === 'PENDING_HOD_APPROVAL' && !['HOD', 'ADMIN'].includes(user.role)) {
+    throw new Error('Only HOD has authority to review or transition timetable from PENDING_HOD_APPROVAL.');
+  }
+
+  if (!['HOD', 'AC', 'ADMIN'].includes(user.role)) {
+    throw new Error('Unauthorized role for timetable status transition.');
   }
 
   version.status = targetStatus;

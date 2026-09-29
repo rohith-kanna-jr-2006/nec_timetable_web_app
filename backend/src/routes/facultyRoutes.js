@@ -17,7 +17,7 @@ router.post(
   facultyController.createFaculty
 );
 router.put('/:facultyId', authenticateUser, requireRole('HOD', 'ADMIN'), facultyController.updateFaculty);
-router.delete('/:facultyId', authenticateUser, requireRole('ADMIN'), facultyController.deleteFaculty);
+router.delete('/:facultyId', authenticateUser, requireRole('HOD', 'ADMIN'), facultyController.deleteFaculty);
 
 module.exports = router;
 

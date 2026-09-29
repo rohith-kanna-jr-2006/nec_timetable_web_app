@@ -428,13 +428,20 @@ async function runTests() {
     assert(hodAbsenceApproveRes.statusCode === 200, 'HOD can approve faculty absence (HTTP 200)');
     assert(hodAbsenceApproveRes.body.data.status === 'APPROVED', 'Absence status successfully marked APPROVED by HOD');
 
-    // 6.6 ADMIN Authority & Non-Admin restrictions
-    const hodDeleteFacultyBlocked = await makeRequest(app, {
+    // 6.6 HOD/ADMIN Faculty Delete Authority & AC restrictions
+    const hodDeleteFacultyRes = await makeRequest(app, {
       method: 'DELETE',
       path: '/api/faculty/FWL-NONEXISTENT',
       headers: { Authorization: `Bearer ${hodToken}` },
     });
-    assert(hodDeleteFacultyBlocked.statusCode === 403, 'HOD is blocked from ADMIN-only delete faculty (HTTP 403)');
+    assert(hodDeleteFacultyRes.statusCode !== 403, 'HOD is authorized to delete faculty (status !== 403)');
+
+    const acDeleteFacultyBlocked = await makeRequest(app, {
+      method: 'DELETE',
+      path: '/api/faculty/FWL-NONEXISTENT',
+      headers: { Authorization: `Bearer ${acToken}` },
+    });
+    assert(acDeleteFacultyBlocked.statusCode === 403, 'AC is blocked from delete faculty (HTTP 403)');
 
     const adminDeleteFacultyRes = await makeRequest(app, {
       method: 'DELETE',

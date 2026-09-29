@@ -10,7 +10,7 @@ router.get('/', hodAllocationController.getAllocations);
 router.post(
   '/',
   authenticateUser,
-  requireRole('HOD', 'AC', 'ADMIN'),
+  requireRole('HOD', 'ADMIN'),
   validate(validateHodAllocation),
   hodAllocationController.createAllocation
 );

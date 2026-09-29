@@ -5,7 +5,7 @@ const { authenticateUser } = require('../middleware/authMiddleware');
 const { requireRole } = require('../middleware/roleMiddleware');
 
 router.get('/', authenticateUser, substituteController.getSubstitutes);
-router.post('/', authenticateUser, requireRole('HOD', 'ADMIN'), substituteController.assignSubstitute);
+router.post('/', authenticateUser, requireRole('HOD', 'AC', 'ADMIN'), substituteController.assignSubstitute);
 router.patch('/:id/status', authenticateUser, substituteController.updateSubstituteStatus);
 
 module.exports = router;

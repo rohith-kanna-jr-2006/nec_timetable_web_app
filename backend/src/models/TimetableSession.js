@@ -67,14 +67,14 @@ const timetableSessionSchema = new mongoose.Schema(
   }
 );
 
-// Conflict detection indexes
+// Conflict detection unique slot indexes
 timetableSessionSchema.index(
   { timetableVersionId: 1, facultyId: 1, day: 1, period: 1 },
-  { name: 'session_faculty_slot_idx' }
+  { name: 'session_faculty_slot_idx', unique: true }
 );
 timetableSessionSchema.index(
   { timetableVersionId: 1, academicContextId: 1, day: 1, period: 1 },
-  { name: 'session_class_slot_idx' }
+  { name: 'session_class_slot_idx', unique: true, partialFilterExpression: { academicContextId: { $exists: true, $ne: null } } }
 );
 
 module.exports = mongoose.model('TimetableSession', timetableSessionSchema);

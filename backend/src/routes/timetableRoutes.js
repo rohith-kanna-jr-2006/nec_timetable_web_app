@@ -24,7 +24,7 @@ router.post(
 router.patch(
   '/version/:id/status',
   authenticateUser,
-  requireRole('HOD', 'ADMIN'),
+  requireRole('HOD', 'AC', 'ADMIN'),
   timetableController.transitionVersion
 );
 

@@ -1,5 +1,9 @@
 const TimetableVersion = require('../models/TimetableVersion');
 const TimetableSession = require('../models/TimetableSession');
+const AcademicContext = require('../models/AcademicContext');
+const Course = require('../models/Course');
+const Faculty = require('../models/Faculty');
+const HODFacultyAllocation = require('../models/HODFacultyAllocation');
 const {
   transitionTimetableStatus,
   getFacultySchedule,
@@ -178,10 +182,164 @@ async function createSession(req, res, next) {
       duration,
     } = req.body;
 
-    // Check for hard conflict: same faculty at same day + period
+    // 1. Resolve and validate Academic Context
+    let context = null;
+    if (academicContextId) {
+      context = await AcademicContext.findById(academicContextId);
+      if (!context) {
+        return errorResponse(res, 'Academic context not found', 404, 'NOT_FOUND');
+      }
+      if (context.status !== 'ACTIVE') {
+        return errorResponse(res, 'Academic context is not active', 400, 'INVALID_CONTEXT');
+      }
+    }
+
+    // 2. Resolve and validate Timetable Version
+    let version = null;
+    if (timetableVersionId) {
+      version = await TimetableVersion.findById(timetableVersionId);
+      if (!version) {
+        return errorResponse(res, 'Timetable version not found', 404, 'NOT_FOUND');
+      }
+      if (!context) {
+        context = await AcademicContext.findOne({
+          academicYear: version.academicYear,
+          semester: version.semester,
+          department: version.department,
+          ...(version.year ? { year: version.year } : {}),
+          ...(version.section ? { section: version.section } : {}),
+        });
+      }
+    }
+
+    if (!context) {
+      return errorResponse(res, 'Valid academic context is required for scheduling', 400, 'BAD_REQUEST');
+    }
+
+    if (!version) {
+      version = await TimetableVersion.findOne({
+        academicYear: context.academicYear,
+        semester: context.semester,
+        department: context.department,
+        year: context.year,
+        section: context.section,
+      }).sort({ createdAt: -1 });
+
+      if (!version) {
+        version = await TimetableVersion.create({
+          academicYear: context.academicYear,
+          semester: context.semester,
+          department: context.department,
+          year: context.year,
+          section: context.section,
+          version: 1,
+          versionLabel: 'v1.0 (Working Draft)',
+          status: 'GENERATED',
+          generatedBy: req.user ? req.user.name || req.user.email : 'AC',
+        });
+      }
+    }
+
+    const finalVersionId = version._id;
+    const finalContextId = context._id;
+
+    // 3. Resolve and validate Course
+    const normalizedCourseCode = courseCode.toUpperCase().trim();
+    const course = await Course.findOne({ courseCode: normalizedCourseCode });
+    if (!course) {
+      return errorResponse(res, `Course '${normalizedCourseCode}' not found`, 404, 'NOT_FOUND');
+    }
+
+    // Verify course belongs to selected academic context / semester
+    const yearToSemester = {
+      'I YEAR': 'Semester I',
+      'II YEAR': 'Semester III',
+      'III YEAR': 'Semester V',
+      'IV YEAR': 'Semester VII',
+    };
+    const ctxYearUpper = (context.year || '').toUpperCase().trim();
+    const expectedSemester = yearToSemester[ctxYearUpper];
+
+    if (expectedSemester && course.semester && course.semester.startsWith('Semester ')) {
+      if (course.semester.toUpperCase() !== expectedSemester.toUpperCase()) {
+        return errorResponse(
+          res,
+          `Course '${normalizedCourseCode}' belongs to ${course.semester}, but selected context is ${context.year} (${expectedSemester}).`,
+          409,
+          'COURSE_SEMESTER_MISMATCH'
+        );
+      }
+    }
+
+    // 4. Server-Side HOD Faculty Allocation Resolution & Enforcement (NO WORKLOAD FALLBACK)
+    const hodAllocs = await HODFacultyAllocation.find({
+      academicContextId: finalContextId,
+      courseCode: normalizedCourseCode,
+      status: { $ne: 'REJECTED' },
+    });
+
+    if (hodAllocs.length === 0) {
+      return errorResponse(
+        res,
+        `This course has no HOD Course → Faculty allocation.`,
+        409,
+        'HOD_ALLOCATION_REQUIRED'
+      );
+    }
+
+    if (hodAllocs.length > 1) {
+      return errorResponse(
+        res,
+        `Multiple active HOD allocations found for course '${normalizedCourseCode}'. HOD resolution is required.`,
+        409,
+        'HOD_ALLOCATION_CONFLICT'
+      );
+    }
+
+    const authoritativeAllocation = hodAllocs[0];
+    const submittedFacultyId = facultyId.trim();
+
+    if (authoritativeAllocation.facultyId !== submittedFacultyId) {
+      return errorResponse(
+        res,
+        `Submitted faculty '${submittedFacultyId}' does not match authoritative HOD allocated faculty '${authoritativeAllocation.facultyId}' for course '${normalizedCourseCode}'.`,
+        409,
+        'HOD_FACULTY_MISMATCH'
+      );
+    }
+
+    // 5. Check Class / Cohort Conflict & Exact Duplicate Session
+    const classConflict = await TimetableSession.findOne({
+      timetableVersionId: finalVersionId,
+      academicContextId: finalContextId,
+      day,
+      period,
+    });
+
+    if (classConflict) {
+      if (
+        classConflict.courseCode === normalizedCourseCode &&
+        classConflict.facultyId === submittedFacultyId
+      ) {
+        return errorResponse(
+          res,
+          `Exact duplicate session already exists for course '${normalizedCourseCode}' on ${day} ${period}.`,
+          409,
+          'DUPLICATE_SESSION'
+        );
+      }
+      return errorResponse(
+        res,
+        `Class already has a session scheduled on ${day} during ${period} (${classConflict.courseCode}).`,
+        409,
+        'CLASS_TIME_CONFLICT'
+      );
+    }
+
+    // 6. Check Faculty Slot Conflict (same faculty at same day + period across version)
     const facultyConflict = await TimetableSession.findOne({
-      timetableVersionId,
-      facultyId,
+      timetableVersionId: finalVersionId,
+      facultyId: submittedFacultyId,
       day,
       period,
     });
@@ -189,28 +347,35 @@ async function createSession(req, res, next) {
     if (facultyConflict) {
       return errorResponse(
         res,
-        `Faculty '${facultyId}' is already scheduled on ${day} during ${period}.`,
+        `Faculty '${submittedFacultyId}' is already scheduled on ${day} during ${period}.`,
         409,
         'FACULTY_TIME_CONFLICT'
       );
     }
 
+    // Auto-resolve facultyName and courseName if missing
+    let resolvedFacultyName = facultyName || authoritativeAllocation.facultyName;
+    if (!resolvedFacultyName) {
+      const fac = await Faculty.findOne({ facultyId: submittedFacultyId });
+      if (fac) resolvedFacultyName = fac.facultyName;
+    }
+
     const session = await TimetableSession.create({
-      timetableVersionId,
-      academicContextId: academicContextId || null,
-      courseCode: courseCode.toUpperCase().trim(),
-      courseName: courseName || '',
-      facultyId,
-      facultyName: facultyName || '',
+      timetableVersionId: finalVersionId,
+      academicContextId: finalContextId,
+      courseCode: normalizedCourseCode,
+      courseName: courseName || course.courseName || '',
+      facultyId: submittedFacultyId,
+      facultyName: resolvedFacultyName || '',
       day,
       period,
       room: room || null,
-      sessionType: sessionType || 'THEORY',
+      sessionType: sessionType || authoritativeAllocation.allocationType || 'THEORY',
       duration: duration || 1,
     });
 
     // Update session count on version
-    await TimetableVersion.findByIdAndUpdate(timetableVersionId, {
+    await TimetableVersion.findByIdAndUpdate(finalVersionId, {
       $inc: { totalScheduledPeriods: 1 },
     });
 

@@ -2,6 +2,7 @@ const TimetableVersion = require('../models/TimetableVersion');
 const TimetableSession = require('../models/TimetableSession');
 const AcademicContext = require('../models/AcademicContext');
 const Faculty = require('../models/Faculty');
+const HODFacultyAllocation = require('../models/HODFacultyAllocation');
 
 async function seedTimetable() {
   console.log('[Seed] Seeding published timetable version and faculty session grid...');
@@ -516,7 +517,62 @@ async function seedTimetable() {
 
   const inserted = await TimetableSession.insertMany(sessions);
   console.log(`[Seed] Successfully seeded ${inserted.length} timetable sessions across Mon-Fri.`);
-  return { version, sessions: inserted };
+
+  // Seed authoritative HOD faculty allocations for all scheduled curriculum courses
+  await HODFacultyAllocation.deleteMany({});
+  const hodAllocsMap = new Map();
+
+  sessions.forEach((s) => {
+    if (s.courseCode && !s.courseCode.startsWith('22CSS')) {
+      const key = `${s.academicContextId}_${s.courseCode}`;
+      if (!hodAllocsMap.has(key)) {
+        hodAllocsMap.set(key, {
+          academicContextId: s.academicContextId,
+          courseCode: s.courseCode,
+          courseName: s.courseName,
+          facultyId: s.facultyId,
+          facultyName: s.facultyName,
+          allocationType: s.sessionType === 'LAB' ? 'LAB_PRIMARY' : 'THEORY',
+          assignedBy: 'Dr. T. Rajasekaran (HOD)',
+          status: 'APPROVED',
+        });
+      }
+    }
+  });
+
+  // Also add allocation for II Year A and IV Year A
+  const iiYearA = await AcademicContext.findOne({ year: 'II Year', section: 'A' });
+  if (iiYearA) {
+    hodAllocsMap.set(`${iiYearA._id}_22CSC06`, {
+      academicContextId: iiYearA._id,
+      courseCode: '22CSC06',
+      courseName: 'Computer Networks',
+      facultyId: 'FWL-02',
+      facultyName: 'Dr. B. Paramasivan',
+      allocationType: 'THEORY',
+      assignedBy: 'Dr. T. Rajasekaran (HOD)',
+      status: 'APPROVED',
+    });
+  }
+
+  const ivYearA = await AcademicContext.findOne({ year: 'IV Year', section: 'A' });
+  if (ivYearA) {
+    hodAllocsMap.set(`${ivYearA._id}_22CSC21`, {
+      academicContextId: ivYearA._id,
+      courseCode: '22CSC21',
+      courseName: 'Cryptography and Network Security',
+      facultyId: 'FWL-01',
+      facultyName: 'Dr. M. Bhuvaneswari',
+      allocationType: 'THEORY',
+      assignedBy: 'Dr. T. Rajasekaran (HOD)',
+      status: 'APPROVED',
+    });
+  }
+
+  const insertedAllocs = await HODFacultyAllocation.insertMany(Array.from(hodAllocsMap.values()));
+  console.log(`[Seed] Successfully seeded ${insertedAllocs.length} authoritative HOD faculty allocations.`);
+
+  return { version, sessions: inserted, hodAllocations: insertedAllocs };
 }
 
 module.exports = { seedTimetable };

@@ -23,10 +23,10 @@ function validateTimetableVersion(req) {
 
 function validateTimetableSession(req) {
   const errors = [];
-  const { timetableVersionId, courseCode, facultyId, day, period } = req.body || {};
+  const { timetableVersionId, academicContextId, courseCode, facultyId, day, period } = req.body || {};
 
-  if (!timetableVersionId) {
-    errors.push('timetableVersionId is required');
+  if (!timetableVersionId && !academicContextId) {
+    errors.push('academicContextId or timetableVersionId is required');
   }
 
   if (!courseCode || typeof courseCode !== 'string' || !courseCode.trim()) {

@@ -1,6 +1,28 @@
 const Course = require('../models/Course');
+const AcademicContext = require('../models/AcademicContext');
 const { successResponse, errorResponse } = require('../utils/responseHandler');
 const { getPaginationParams, formatPaginatedResult } = require('../utils/pagination');
+
+/**
+ * Roman to Arabic / Roman normalization map
+ */
+const NUMERAL_TO_ROMAN = {
+  '1': 'I', 'I': 'I',
+  '2': 'II', 'II': 'II',
+  '3': 'III', 'III': 'III',
+  '4': 'IV', 'IV': 'IV',
+  '5': 'V', 'V': 'V',
+  '6': 'VI', 'VI': 'VI',
+  '7': 'VII', 'VII': 'VII',
+  '8': 'VIII', 'VIII': 'VIII',
+};
+
+const YEAR_TO_SEMESTER_ODD = {
+  'I YEAR': 'Semester I', '1': 'Semester I', 'I': 'Semester I',
+  'II YEAR': 'Semester III', '2': 'Semester III', 'II': 'Semester III',
+  'III YEAR': 'Semester V', '3': 'Semester V', 'III': 'Semester V',
+  'IV YEAR': 'Semester VII', '4': 'Semester VII', 'IV': 'Semester VII',
+};
 
 /**
  * Get courses list with filters and pagination
@@ -19,10 +41,32 @@ async function getCourses(req, res, next) {
       vertical,
       isLab,
       isR22UG,
+      academicContextId,
+      year,
     } = req.query;
     const { page, limit, skip } = getPaginationParams(req.query);
 
     const query = { isActive: true };
+
+    if (academicContextId) {
+      const context = await AcademicContext.findById(academicContextId);
+      if (context) {
+        const ctxYearUpper = (context.year || '').toUpperCase().trim();
+        const mappedSem = YEAR_TO_SEMESTER_ODD[ctxYearUpper];
+        if (mappedSem && !semester) {
+          query.semester = { $regex: `^${mappedSem}$`, $options: 'i' };
+        }
+        if (context.program === 'UG' && isR22UG === undefined) {
+          query.isR22UG = true;
+        }
+      }
+    } else if (year && !semester) {
+      const yearUpper = year.toUpperCase().trim();
+      const mappedSem = YEAR_TO_SEMESTER_ODD[yearUpper];
+      if (mappedSem) {
+        query.semester = { $regex: `^${mappedSem}$`, $options: 'i' };
+      }
+    }
 
     if (search) {
       const q = search.trim();
@@ -56,8 +100,13 @@ async function getCourses(req, res, next) {
 
     if (semester) {
       const sem = semester.trim();
-      const semNorm = sem.replace(/^semester\s+/i, '');
-      query.semester = { $regex: `^Semester ${semNorm}$`, $options: 'i' };
+      const semClean = sem.replace(/^semester\s+/i, '').trim().toUpperCase();
+      const roman = NUMERAL_TO_ROMAN[semClean];
+      if (roman) {
+        query.semester = { $regex: `^Semester ${roman}$`, $options: 'i' };
+      } else {
+        query.semester = { $regex: `^${sem}$`, $options: 'i' };
+      }
     }
 
     if (department) {
