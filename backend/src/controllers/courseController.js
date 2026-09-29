@@ -59,7 +59,7 @@ async function getCourses(req, res, next) {
       academicContextId,
       year,
     } = req.query;
-    const { page, limit, skip } = getPaginationParams(req.query);
+    const { page, limit, skip } = getPaginationParams(req.query, 500);
 
     const query = { isActive: true };
 

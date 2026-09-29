@@ -7,7 +7,7 @@
     "start": "node src/server.js",
     "dev": "node --watch src/server.js",
     "seed": "node src/seeds/seed.js",
-    "test": "node tests/backend.test.js && node tests/facultyCreation.test.js && node tests/r22Curriculum.test.js && node tests/coordinatorTimetableFlow.test.js && node tests/timetableSolver.test.js && node tests/hodCurriculumAllocation.test.js"
+    "test": "node tests/backend.test.js && node tests/facultyCreation.test.js && node tests/r22Curriculum.test.js && node tests/academicRegulation.test.js && node tests/coordinatorTimetableFlow.test.js && node tests/timetableSolver.test.js && node tests/hodCurriculumAllocation.test.js"
   },
   "keywords": [
     "nec",

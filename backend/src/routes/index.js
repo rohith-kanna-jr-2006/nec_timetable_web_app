@@ -14,6 +14,7 @@ const notificationRoutes = require('./notificationRoutes');
 const availabilityRoutes = require('./availabilityRoutes');
 const absenceRoutes = require('./absenceRoutes');
 const substituteRoutes = require('./substituteRoutes');
+const regulationRoutes = require('./regulationRoutes');
 
 /**
  * Health Check Endpoint
@@ -31,6 +32,8 @@ router.use('/auth', authRoutes);
 router.use('/faculty', facultyRoutes);
 router.use('/workload', workloadRoutes);
 router.use('/courses', courseRoutes);
+router.use('/regulations', regulationRoutes);
+router.use('/regulation', regulationRoutes);
 router.use('/course-faculty-handlers', courseFacultyHandlerRoutes);
 router.use('/academic-contexts', academicContextRoutes);
 router.use('/class-advisors', classAdvisorRoutes);
