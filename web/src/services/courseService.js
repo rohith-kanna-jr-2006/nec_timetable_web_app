@@ -11,10 +11,13 @@ import { api } from './api.js';
  */
 export async function getCourses(params = {}) {
   const query = new URLSearchParams();
+  if (params.academicContextId) query.append('academicContextId', params.academicContextId);
+  if (params.year) query.append('year', params.year);
   if (params.department) query.append('department', params.department);
   if (params.regulation) query.append('regulation', params.regulation);
   if (params.semester) query.append('semester', params.semester);
   if (params.type) query.append('type', params.type);
+  if (params.courseType) query.append('courseType', params.courseType);
   if (params.limit) query.append('limit', params.limit);
 
   const qs = query.toString();

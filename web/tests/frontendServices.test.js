@@ -58,7 +58,10 @@ async function runFrontendServiceTests() {
   const retrieved = getStoredUser();
   assert(retrieved && retrieved.name === 'Dr. Test', 'setStoredUser / getStoredUser persists and retrieves profile');
   
+  const origFetch = global.fetch;
+  global.fetch = () => Promise.reject(new TypeError('Failed to fetch'));
   const currentUser = await getCurrentUser();
+  global.fetch = origFetch;
   assert(currentUser && currentUser.role === 'FACULTY', 'getCurrentUser falls back to stored user when offline');
 
   setStoredUser(null);
