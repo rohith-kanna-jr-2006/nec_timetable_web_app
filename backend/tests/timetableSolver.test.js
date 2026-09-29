@@ -214,29 +214,35 @@ async function runTimetableSolverTests() {
     assert(sem7Courses.length === 2, `Semester VII core courses count is 2 (got: ${sem7Courses.length})`);
     assert(sem7Courses.every((c) => c.semester === 'Semester VII'), 'All courses belong to Semester VII');
 
-    // Prepare reliable HOD allocations for III Year Section A
-    const iiiCourses = await Course.find({ semester: 'Semester V', isActive: true });
-    const facultyPool = ['FWL-01', 'FWL-02', 'FWL-03', 'FWL-04', 'FWL-06', 'FWL-14'];
-    
-    // Look up existing faculty records without mutating names
-    const facultyMap = new Map();
-    for (const fId of facultyPool) {
-      const f = await Faculty.findOne({ facultyId: fId });
-      if (f) facultyMap.set(fId, f.facultyName);
+    // Prepare reliable authoritative HOD allocations for III Year Section A
+    const authoritativeAllocations = [
+      { courseCode: '22CSC14', courseName: 'Principles of Compiler Design', facultyId: 'FWL-04', facultyName: 'Dr. A. Manchula', allocationType: 'THEORY' },
+      { courseCode: '22CSC15', courseName: 'Full Stack Development', facultyId: 'FWL-14', facultyName: 'Ms. D. Vinoparkavi', allocationType: 'THEORY' },
+      { courseCode: '22CSC16', courseName: 'Object Oriented Software Engineering', facultyId: 'FWL-03', facultyName: 'Dr. S. Karpusamy', allocationType: 'THEORY' },
+      { courseCode: '22CSP09', courseName: 'Full Stack Development Laboratory', facultyId: 'FWL-01', facultyName: 'Dr. T. Rajasekaran', allocationType: 'LAB_PRIMARY' },
+      { courseCode: '22CSP10', courseName: 'Object Oriented Software Engineering Laboratory', facultyId: 'FWL-06', facultyName: 'Mrs. E. Padma', allocationType: 'LAB_PRIMARY' },
+      { courseCode: '22MAN8R', courseName: 'Soft/Analytical Skills - IV', facultyId: 'FWL-02', facultyName: 'Dr. B. Paramasivan', allocationType: 'THEORY' },
+    ];
+
+    // Ensure all faculty in authoritative allocations exist
+    for (const alloc of authoritativeAllocations) {
+      await Faculty.findOneAndUpdate(
+        { facultyId: alloc.facultyId },
+        { $set: { facultyName: alloc.facultyName, department: 'CSE', isActive: true } },
+        { upsert: true }
+      );
     }
 
     // Set allocations for III Year A
     await HODFacultyAllocation.deleteMany({ academicContextId: ctxIII_A._id });
-    for (let i = 0; i < iiiCourses.length; i++) {
-      const c = iiiCourses[i];
-      const fId = facultyPool[i % facultyPool.length];
+    for (const alloc of authoritativeAllocations) {
       await HODFacultyAllocation.create({
         academicContextId: ctxIII_A._id,
-        courseCode: c.courseCode,
-        courseName: c.courseName,
-        facultyId: fId,
-        facultyName: facultyMap.get(fId) || `Faculty ${fId}`,
-        allocationType: (c.isLab || c.courseType === 'LAB') ? 'LAB_PRIMARY' : 'THEORY',
+        courseCode: alloc.courseCode,
+        courseName: alloc.courseName,
+        facultyId: alloc.facultyId,
+        facultyName: alloc.facultyName,
+        allocationType: alloc.allocationType,
         assignedBy: 'Dr. T. Rajasekaran (HOD)',
         status: 'APPROVED',
       });
@@ -246,15 +252,15 @@ async function runTimetableSolverTests() {
     // TEST 4: Missing HOD allocation blocks generation
     // ------------------------------------------------------------
     console.log('\n--- TEST 4: Missing HOD allocation blocks generation ---');
-    // Remove allocation for first course
-    const firstCourseCode = iiiCourses[0].courseCode;
-    await HODFacultyAllocation.deleteOne({ academicContextId: ctxIII_A._id, courseCode: firstCourseCode });
+    // Remove allocation for 22CSC16
+    const testCourse = authoritativeAllocations[2]; // 22CSC16
+    await HODFacultyAllocation.deleteOne({ academicContextId: ctxIII_A._id, courseCode: testCourse.courseCode });
 
     let test4Error = null;
     try {
       await buildSchedulingContext({
         academicContextId: ctxIII_A._id,
-        assignmentPlan: [{ courseCode: firstCourseCode }],
+        assignmentPlan: [{ courseCode: testCourse.courseCode }],
       });
     } catch (err) {
       test4Error = err;
@@ -264,11 +270,11 @@ async function runTimetableSolverTests() {
     // Restore allocation
     await HODFacultyAllocation.create({
       academicContextId: ctxIII_A._id,
-      courseCode: firstCourseCode,
-      courseName: iiiCourses[0].courseName,
-      facultyId: facultyPool[0],
-      facultyName: 'Dr. Test Faculty 1',
-      allocationType: (iiiCourses[0].isLab || iiiCourses[0].courseType === 'LAB') ? 'LAB_PRIMARY' : 'THEORY',
+      courseCode: testCourse.courseCode,
+      courseName: testCourse.courseName,
+      facultyId: testCourse.facultyId,
+      facultyName: testCourse.facultyName,
+      allocationType: testCourse.allocationType,
       assignedBy: 'Dr. T. Rajasekaran (HOD)',
       status: 'APPROVED',
     });
@@ -279,8 +285,8 @@ async function runTimetableSolverTests() {
     console.log('\n--- TEST 5: Multiple HOD allocations block generation ---');
     const duplicateAlloc = await HODFacultyAllocation.create({
       academicContextId: ctxIII_A._id,
-      courseCode: firstCourseCode,
-      courseName: iiiCourses[0].courseName,
+      courseCode: testCourse.courseCode,
+      courseName: testCourse.courseName,
       facultyId: 'FWL-12',
       facultyName: 'Conflicting Faculty',
       allocationType: 'THEORY',
@@ -292,7 +298,7 @@ async function runTimetableSolverTests() {
     try {
       await buildSchedulingContext({
         academicContextId: ctxIII_A._id,
-        assignmentPlan: [{ courseCode: firstCourseCode }],
+        assignmentPlan: [{ courseCode: testCourse.courseCode }],
       });
     } catch (err) {
       test5Error = err;
@@ -308,7 +314,7 @@ async function runTimetableSolverTests() {
     try {
       await buildSchedulingContext({
         academicContextId: ctxIII_A._id,
-        assignmentPlan: [{ courseCode: firstCourseCode, facultyId: 'FWL-99' }],
+        assignmentPlan: [{ courseCode: testCourse.courseCode, facultyId: 'FWL-99' }],
       });
     } catch (err) {
       test6Error = err;
@@ -721,6 +727,20 @@ async function runTimetableSolverTests() {
 
     // Ensure authoritative HOD allocations for courses in targetedPlan
     await HODFacultyAllocation.findOneAndUpdate(
+      { academicContextId: ctxIII_A._id, courseCode: '22CSC14' },
+      {
+        $set: {
+          courseName: 'Principles of Compiler Design',
+          facultyId: 'FWL-04',
+          facultyName: 'Dr. A. Manchula',
+          allocationType: 'THEORY',
+          assignedBy: 'HOD',
+          status: 'APPROVED',
+        },
+      },
+      { upsert: true }
+    );
+    await HODFacultyAllocation.findOneAndUpdate(
       { academicContextId: ctxIII_A._id, courseCode: '22CSC15' },
       {
         $set: {
@@ -836,15 +856,15 @@ async function runTimetableSolverTests() {
       { upsert: true }
     );
     // Mark this faculty unavailable everywhere
-    DEFAULT_DAYS.forEach(async (d) => {
-      DEFAULT_PERIODS.forEach(async (p) => {
+    for (const d of DEFAULT_DAYS) {
+      for (const p of DEFAULT_PERIODS) {
         await FacultyAvailability.findOneAndUpdate(
           { facultyId: 'FWL-99_UNAVAIL', day: d, period: p },
           { $set: { status: 'UNAVAILABLE' } },
           { upsert: true }
         );
-      });
-    });
+      }
+    }
 
     const unavailPlanResult = await solveAndPersistTimetable({
       academicContextId: ctxIII_A._id,
