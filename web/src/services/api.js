@@ -3,7 +3,7 @@
  * Centralized HTTP request client with token injection and standardized error normalization.
  */
 
-const DEFAULT_API_URL = 'http://localhost:5000/api';
+const DEFAULT_API_URL = '/api';
 
 const API_BASE_URL = (
   typeof process !== 'undefined' && process.env && process.env.REACT_APP_API_URL
@@ -57,7 +57,15 @@ export function clearAuthSession() {
  */
 async function request(endpoint, options = {}) {
   const cleanEndpoint = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
-  const url = `${API_BASE_URL}${cleanEndpoint}`;
+  let url;
+  if (API_BASE_URL.startsWith('http://') || API_BASE_URL.startsWith('https://')) {
+    url = `${API_BASE_URL}${cleanEndpoint}`;
+  } else if (typeof window !== 'undefined') {
+    url = `${API_BASE_URL}${cleanEndpoint}`;
+  } else {
+    // Running in Node.js test environment
+    url = `http://127.0.0.1:3000${API_BASE_URL}${cleanEndpoint}`;
+  }
 
   const token = getAuthToken();
   const headers = {
@@ -109,9 +117,9 @@ async function request(endpoint, options = {}) {
 
     return data;
   } catch (error) {
-    if (error.name === 'TypeError' && error.message.includes('fetch')) {
+    if (error.name === 'TypeError' && (error.message.includes('fetch') || error.message.includes('URL'))) {
       const netError = new Error(
-        `Unable to reach backend service at ${API_BASE_URL}. Ensure the server is running on port 5000.`
+        `Unable to reach backend service at ${API_BASE_URL}. Ensure the server is running.`
       );
       netError.status = 0;
       netError.code = 'NETWORK_ERROR';

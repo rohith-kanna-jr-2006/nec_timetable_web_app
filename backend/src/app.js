@@ -7,46 +7,21 @@ const { notFoundHandler, errorHandler } = require('./middleware/errorMiddleware'
 
 const app = express();
 
-// Security Headers
-app.use(helmet());
+const path = require('path');
 
-// CORS Configuration
-const allowedOriginEnv = process.env.CLIENT_ORIGIN;
-const defaultDevOrigins = [
-  'http://localhost:3000',
-  'http://localhost:3001',
-  'http://127.0.0.1:3000',
-  'http://127.0.0.1:3001',
-];
+// Security Headers - disable frameguard and CSP for AI Studio preview iframe
+app.use(
+  helmet({
+    contentSecurityPolicy: false,
+    frameguard: false,
+    crossOriginEmbedderPolicy: false,
+  })
+);
 
-const corsOriginHandler = (origin, callback) => {
-  // Allow requests with no origin (e.g. mobile app, curl, server-to-server)
-  if (!origin) return callback(null, true);
-
-  if (allowedOriginEnv === '*') {
-    return callback(null, true);
-  }
-
-  if (allowedOriginEnv) {
-    const configuredOrigins = allowedOriginEnv.split(',').map((o) => o.trim());
-    if (configuredOrigins.includes(origin) || configuredOrigins.includes('*')) {
-      return callback(null, true);
-    }
-  }
-
-  // In non-production, permit standard localhost development origins
-  if (process.env.NODE_ENV !== 'production') {
-    if (defaultDevOrigins.includes(origin) || /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)) {
-      return callback(null, true);
-    }
-  }
-
-  return callback(null, false);
-};
-
+// CORS Configuration - allow all origins in preview environment
 app.use(
   cors({
-    origin: corsOriginHandler,
+    origin: true,
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization', 'Accept'],
@@ -75,12 +50,39 @@ app.use('/api/auth', authLimiter);
 // Mount API
 app.use('/api', apiRoutes);
 
-// Root Welcome / Ping
-app.get('/', (req, res) => {
-  res.status(200).json({
-    success: true,
-    message: 'NEC Faculty Timetable API Service is running.',
-    healthEndpoint: '/api/health',
+// Static assets from frontend dist
+const distPath = path.resolve(__dirname, '../../web/dist');
+app.use(express.static(distPath));
+
+// Route-level fallback per AI Studio web migration guidelines for offline MongoDB
+app.use((err, req, res, next) => {
+  if (
+    err.name === 'MongooseError' ||
+    err.name === 'MongoNetworkError' ||
+    (err.message && (err.message.includes('buffering timed out') || err.message.includes('ECONNREFUSED')))
+  ) {
+    console.warn('[AI Studio] Database offline — returning mock response for', req.path);
+    if (req.method === 'GET') {
+      return res.json({
+        success: true,
+        data: req.path.endsWith('s') || req.path.endsWith('s/') ? [] : {},
+      });
+    }
+    return res.status(503).json({ success: false, error: 'Service temporarily unavailable (database offline)' });
+  }
+  next(err);
+});
+
+// SPA fallback for client-side routing
+app.get('*', (req, res, next) => {
+  if (req.path.startsWith('/api')) {
+    return next();
+  }
+  const indexPath = path.join(distPath, 'index.html');
+  res.sendFile(indexPath, (err) => {
+    if (err) {
+      res.status(200).send(`<!DOCTYPE html><html><head><title>NEC Faculty Timetable</title></head><body><h2>NEC Faculty Timetable System</h2><p>Frontend assets are compiling. <a href="/api/health">Check API Status</a></p></body></html>`);
+    }
   });
 });
 

@@ -167,11 +167,4 @@ export const timetableService = {
   calculateTimetableMetrics,
 };
 
-export async function generateTimetable(payload) {
-  const response = await api.post('/timetable/solve', payload);
-  return response?.data || response;
-}
-
-timetableService.generateTimetable = generateTimetable;
-
 export default timetableService;

@@ -11,18 +11,28 @@ import { api } from './api.js';
  */
 export async function getCourses(params = {}) {
   const query = new URLSearchParams();
-  if (params.academicContextId) query.append('academicContextId', params.academicContextId);
-  if (params.year) query.append('year', params.year);
   if (params.department) query.append('department', params.department);
   if (params.regulation) query.append('regulation', params.regulation);
   if (params.semester) query.append('semester', params.semester);
   if (params.type) query.append('type', params.type);
-  if (params.courseType) query.append('courseType', params.courseType);
-  if (params.limit) query.append('limit', params.limit);
+  if (params.category) query.append('category', params.category);
+  if (params.search) query.append('search', params.search);
+  if (params.vertical) query.append('vertical', params.vertical);
+  if (params.electiveType) query.append('electiveType', params.electiveType);
+  query.append('limit', params.limit || 200);
 
   const qs = query.toString();
   const endpoint = `/courses${qs ? `?${qs}` : ''}`;
   const response = await api.get(endpoint);
+  return response?.data || response;
+}
+
+/**
+ * Fetch Authoritative R22 Curriculum Overview & Complete Structure
+ * GET /api/courses/curriculum/r22
+ */
+export async function getR22CurriculumOverview() {
+  const response = await api.get('/courses/curriculum/r22');
   return response?.data || response;
 }
 
@@ -65,6 +75,7 @@ export async function deleteCourse(courseCode) {
 
 export default {
   getCourses,
+  getR22CurriculumOverview,
   getCourseByCode,
   createCourse,
   updateCourse,

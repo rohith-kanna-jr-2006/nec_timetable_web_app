@@ -1,0 +1,8 @@
+{
+  "name": "NEC Faculty Timetable & Workload System",
+  "description": "Nandha Engineering College (Autonomous) - Faculty Timetable & Workload Management System supporting HOD, Coordinator, and Faculty portals with schedule optimization.",
+  "permissions": [],
+  "capabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

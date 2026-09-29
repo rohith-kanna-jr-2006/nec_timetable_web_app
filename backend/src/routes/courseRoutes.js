@@ -5,6 +5,7 @@ const { authenticateUser } = require('../middleware/authMiddleware');
 const { requireRole } = require('../middleware/roleMiddleware');
 
 router.get('/', courseController.getCourses);
+router.get('/curriculum/r22', courseController.getR22CurriculumOverview);
 router.get('/:courseCode', courseController.getCourseByCode);
 router.post('/', authenticateUser, requireRole('HOD', 'AC', 'ADMIN'), courseController.createCourse);
 router.put('/:courseCode', authenticateUser, requireRole('HOD', 'AC', 'ADMIN'), courseController.updateCourse);

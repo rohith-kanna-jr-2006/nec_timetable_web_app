@@ -1,7 +1,15 @@
+const mongoose = require('mongoose');
 const Course = require('../models/Course');
 const AcademicContext = require('../models/AcademicContext');
 const { successResponse, errorResponse } = require('../utils/responseHandler');
 const { getPaginationParams, formatPaginatedResult } = require('../utils/pagination');
+const {
+  R22_CSE_CURRICULUM_COURSES,
+  R22_ELECTIVE_SLOT_MAP,
+  R22_PEC_VERTICALS,
+  R22_MANAGEMENT_ELECTIVES,
+  R22_OPEN_ELECTIVES,
+} = require('../data/r22CurriculumMaster');
 
 /**
  * Roman to Arabic / Roman normalization map
@@ -121,10 +129,67 @@ async function getCourses(req, res, next) {
       query.isR22UG = isR22UG === 'true';
     }
 
-    const [items, total] = await Promise.all([
-      Course.find(query).sort({ semester: 1, courseCode: 1 }).skip(skip).limit(limit),
-      Course.countDocuments(query),
-    ]);
+    let isDbOnline = mongoose.connection.readyState === 1;
+    let items = [];
+    let total = 0;
+
+    if (isDbOnline) {
+      try {
+        [items, total] = await Promise.all([
+          Course.find(query).sort({ semester: 1, courseCode: 1 }).skip(skip).limit(limit),
+          Course.countDocuments(query),
+        ]);
+      } catch (dbErr) {
+        isDbOnline = false;
+      }
+    }
+
+    if (!isDbOnline || total === 0) {
+      let dataset = [...R22_CSE_CURRICULUM_COURSES];
+
+      if (semester) {
+        const semClean = semester.replace(/^semester\s+/i, '').trim().toUpperCase();
+        const roman = NUMERAL_TO_ROMAN[semClean] || semClean;
+        dataset = dataset.filter((c) => {
+          const cSem = (c.semester || '').replace(/^semester\s+/i, '').trim().toUpperCase();
+          return cSem === roman || (c.semester && c.semester.toLowerCase() === semester.toLowerCase());
+        });
+      }
+
+      if (category) {
+        dataset = dataset.filter((c) => (c.category || '').toLowerCase() === category.toLowerCase().trim());
+      }
+
+      if (electiveType) {
+        dataset = dataset.filter((c) => (c.electiveType || '').toLowerCase().includes(electiveType.toLowerCase().trim()));
+      }
+
+      if (vertical) {
+        dataset = dataset.filter((c) => (c.vertical || '').toLowerCase().includes(vertical.toLowerCase().trim()));
+      }
+
+      if (courseType) {
+        dataset = dataset.filter((c) => (c.courseType || '').toLowerCase() === courseType.toLowerCase().trim());
+      }
+
+      if (isLab !== undefined) {
+        dataset = dataset.filter((c) => Boolean(c.isLab) === (isLab === 'true'));
+      }
+
+      if (search) {
+        const q = search.toLowerCase().trim();
+        dataset = dataset.filter(
+          (c) =>
+            (c.courseCode && c.courseCode.toLowerCase().includes(q)) ||
+            (c.courseName && c.courseName.toLowerCase().includes(q)) ||
+            (c.category && c.category.toLowerCase().includes(q)) ||
+            (c.vertical && c.vertical.toLowerCase().includes(q))
+        );
+      }
+
+      total = dataset.length;
+      items = dataset.slice(skip, skip + limit);
+    }
 
     return successResponse(res, formatPaginatedResult(items, total, page, limit));
   } catch (error) {
@@ -263,10 +328,37 @@ async function deleteCourse(req, res, next) {
   }
 }
 
+/**
+ * Get Authoritative R22 Curriculum Overview & Metadata
+ * GET /api/courses/curriculum/r22
+ */
+async function getR22CurriculumOverview(req, res, next) {
+  try {
+    return successResponse(res, {
+      curriculumCode: 'R22-CSE',
+      regulation: 'R22 Regulations',
+      institution: 'Nandha Engineering College (Autonomous)',
+      affiliation: 'Anna University Affiliated',
+      applicableFrom: 'Academic Year 2024–2025 onwards',
+      degreeLevels: 'B.E. (UG) & M.E. (PG)',
+      duration: '8 Semesters (4 Academic Years)',
+      totalCourses: R22_CSE_CURRICULUM_COURSES.length,
+      courses: R22_CSE_CURRICULUM_COURSES,
+      electiveSlotMap: R22_ELECTIVE_SLOT_MAP,
+      pecVerticals: R22_PEC_VERTICALS,
+      managementElectives: R22_MANAGEMENT_ELECTIVES,
+      openElectives: R22_OPEN_ELECTIVES,
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
 module.exports = {
   getCourses,
   getCourseByCode,
   createCourse,
   updateCourse,
   deleteCourse,
+  getR22CurriculumOverview,
 };

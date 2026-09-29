@@ -2,7 +2,6 @@ const TimetableVersion = require('../models/TimetableVersion');
 const TimetableSession = require('../models/TimetableSession');
 const AcademicContext = require('../models/AcademicContext');
 const Faculty = require('../models/Faculty');
-const Course = require('../models/Course');
 const HODFacultyAllocation = require('../models/HODFacultyAllocation');
 
 async function seedTimetable() {
@@ -32,7 +31,6 @@ async function seedTimetable() {
   await TimetableVersion.deleteMany({});
 
   const version = await TimetableVersion.create({
-    academicContextId: context._id,
     academicYear: '2026-27',
     semester: 'Odd Semester',
     department: 'CSE',
@@ -50,22 +48,8 @@ async function seedTimetable() {
     totalScheduledPeriods: 35,
   });
 
-  // Authoritative Semester V Core + Approved Elective Courses:
-  // 22CSC14: Principles of Compiler Design (4 periods)
-  // 22CSC15: Full Stack Development (3 periods)
-  // 22CSC16: Object Oriented Software Engineering (3 periods)
-  // 22CSP09: Full Stack Development Laboratory (4 periods)
-  // 22CSP10: Object Oriented Software Engineering Laboratory (4 periods)
-  // 22MAN8R: Soft/Analytical Skills - IV (3 periods)
-  // 22CSX42: UI and UX Design [PEC - Slot E1] (3 periods)
-  // 22CSX21: Fundamentals of Cryptography and Network Security [PEC - Slot E2] (3 periods)
-  // Total Curriculum Contact Periods = 27 periods
-  // Institutional Non-Academic Support Periods = 8 periods (Library, Mentoring, Seminar, Sports, Self-Study)
-
   const sessions = [
-    // =========================================================================
-    // MONDAY (7 periods)
-    // =========================================================================
+    // --- MONDAY ---
     {
       timetableVersionId: version._id,
       academicContextId: context._id,
@@ -83,7 +67,7 @@ async function seedTimetable() {
       timetableVersionId: version._id,
       academicContextId: context._id,
       courseCode: '22CSC15',
-      courseName: 'Full Stack Development',
+      courseName: 'Full Stack Development (PBL)',
       facultyId: 'FWL-14',
       facultyName: 'Ms. D. Vinoparkavi',
       day: 'MON',
@@ -96,11 +80,24 @@ async function seedTimetable() {
       timetableVersionId: version._id,
       academicContextId: context._id,
       courseCode: '22CSX42',
-      courseName: 'UI and UX Design',
+      courseName: 'UI and UX Design (PSE)',
       facultyId: 'FWL-06',
       facultyName: 'Mrs. E. Padma',
       day: 'MON',
       period: 'P3',
+      room: 'LH-101',
+      sessionType: 'THEORY',
+      duration: 1,
+    },
+    {
+      timetableVersionId: version._id,
+      academicContextId: context._id,
+      courseCode: '22CSC16',
+      courseName: 'Object Oriented Software Engineering',
+      facultyId: 'FWL-03',
+      facultyName: 'Dr. S. Karpusamy',
+      day: 'MON',
+      period: 'P4',
       room: 'LH-101',
       sessionType: 'THEORY',
       duration: 1,
@@ -113,19 +110,6 @@ async function seedTimetable() {
       facultyId: 'FWL-04',
       facultyName: 'Dr. A. Manchula',
       day: 'MON',
-      period: 'P4',
-      room: 'LH-101',
-      sessionType: 'THEORY',
-      duration: 1,
-    },
-    {
-      timetableVersionId: version._id,
-      academicContextId: context._id,
-      courseCode: '22MAN8R',
-      courseName: 'Soft/Analytical Skills - IV',
-      facultyId: 'FWL-12',
-      facultyName: 'Mrs. K. Eswari',
-      day: 'MON',
       period: 'P5',
       room: 'LH-101',
       sessionType: 'THEORY',
@@ -135,7 +119,7 @@ async function seedTimetable() {
       timetableVersionId: version._id,
       academicContextId: context._id,
       courseCode: '22CSX21',
-      courseName: 'Fundamentals of Cryptography and Network Security',
+      courseName: 'Fundamentals of Cryptography and Network Security (PSE)',
       facultyId: 'FWL-12',
       facultyName: 'Mrs. K. Eswari',
       day: 'MON',
@@ -147,7 +131,7 @@ async function seedTimetable() {
     {
       timetableVersionId: version._id,
       academicContextId: context._id,
-      courseCode: 'LIBRARY',
+      courseCode: '22CSS01',
       courseName: 'Library & Online Certification',
       facultyId: 'FWL-06',
       facultyName: 'Mrs. E. Padma',
@@ -158,9 +142,7 @@ async function seedTimetable() {
       duration: 1,
     },
 
-    // =========================================================================
-    // TUESDAY (7 periods)
-    // =========================================================================
+    // --- TUESDAY ---
     {
       timetableVersionId: version._id,
       academicContextId: context._id,
@@ -178,7 +160,7 @@ async function seedTimetable() {
       timetableVersionId: version._id,
       academicContextId: context._id,
       courseCode: '22CSX21',
-      courseName: 'Fundamentals of Cryptography and Network Security',
+      courseName: 'Fundamentals of Cryptography and Network Security (PSE)',
       facultyId: 'FWL-12',
       facultyName: 'Mrs. K. Eswari',
       day: 'TUE',
@@ -191,7 +173,7 @@ async function seedTimetable() {
       timetableVersionId: version._id,
       academicContextId: context._id,
       courseCode: '22CSC15',
-      courseName: 'Full Stack Development',
+      courseName: 'Full Stack Development (PBL)',
       facultyId: 'FWL-14',
       facultyName: 'Ms. D. Vinoparkavi',
       day: 'TUE',
@@ -203,15 +185,15 @@ async function seedTimetable() {
     {
       timetableVersionId: version._id,
       academicContextId: context._id,
-      courseCode: '22CSP10',
-      courseName: 'Object Oriented Software Engineering Laboratory',
+      courseCode: '22CSM01',
+      courseName: 'Mentor Proctoring & Interaction',
       facultyId: 'FWL-03',
       facultyName: 'Dr. S. Karpusamy',
       day: 'TUE',
       period: 'P4',
-      room: 'Systems Lab 2',
-      sessionType: 'LAB',
-      duration: 4,
+      room: 'LH-101',
+      sessionType: 'SAS',
+      duration: 1,
     },
     {
       timetableVersionId: version._id,
@@ -224,7 +206,7 @@ async function seedTimetable() {
       period: 'P5',
       room: 'Systems Lab 2',
       sessionType: 'LAB',
-      duration: 4,
+      duration: 3,
     },
     {
       timetableVersionId: version._id,
@@ -237,7 +219,7 @@ async function seedTimetable() {
       period: 'P6',
       room: 'Systems Lab 2',
       sessionType: 'LAB',
-      duration: 4,
+      duration: 3,
     },
     {
       timetableVersionId: version._id,
@@ -250,17 +232,15 @@ async function seedTimetable() {
       period: 'P7',
       room: 'Systems Lab 2',
       sessionType: 'LAB',
-      duration: 4,
+      duration: 3,
     },
 
-    // =========================================================================
-    // WEDNESDAY (7 periods)
-    // =========================================================================
+    // --- WEDNESDAY ---
     {
       timetableVersionId: version._id,
       academicContextId: context._id,
       courseCode: '22CSX42',
-      courseName: 'UI and UX Design',
+      courseName: 'UI and UX Design (PSE)',
       facultyId: 'FWL-06',
       facultyName: 'Mrs. E. Padma',
       day: 'WED',
@@ -293,7 +273,7 @@ async function seedTimetable() {
       period: 'P3',
       room: 'Web Tech Lab',
       sessionType: 'LAB',
-      duration: 4,
+      duration: 2,
     },
     {
       timetableVersionId: version._id,
@@ -306,76 +286,74 @@ async function seedTimetable() {
       period: 'P4',
       room: 'Web Tech Lab',
       sessionType: 'LAB',
-      duration: 4,
+      duration: 2,
     },
     {
       timetableVersionId: version._id,
       academicContextId: context._id,
-      courseCode: '22CSP09',
-      courseName: 'Full Stack Development Laboratory',
-      facultyId: 'FWL-14',
-      facultyName: 'Ms. D. Vinoparkavi',
+      courseCode: '22CSC14',
+      courseName: 'Principles of Compiler Design',
+      facultyId: 'FWL-04',
+      facultyName: 'Dr. A. Manchula',
       day: 'WED',
       period: 'P5',
-      room: 'Web Tech Lab',
-      sessionType: 'LAB',
-      duration: 4,
+      room: 'LH-101',
+      sessionType: 'THEORY',
+      duration: 1,
     },
     {
       timetableVersionId: version._id,
       academicContextId: context._id,
-      courseCode: '22CSP09',
-      courseName: 'Full Stack Development Laboratory',
-      facultyId: 'FWL-14',
-      facultyName: 'Ms. D. Vinoparkavi',
+      courseCode: '22CSX21',
+      courseName: 'Fundamentals of Cryptography and Network Security (PSE)',
+      facultyId: 'FWL-12',
+      facultyName: 'Mrs. K. Eswari',
       day: 'WED',
       period: 'P6',
-      room: 'Web Tech Lab',
-      sessionType: 'LAB',
-      duration: 4,
+      room: 'LH-101',
+      sessionType: 'THEORY',
+      duration: 1,
     },
     {
       timetableVersionId: version._id,
       academicContextId: context._id,
-      courseCode: 'SEMINAR',
+      courseCode: '22CST01',
       courseName: 'Technical Seminar & Communication',
       facultyId: 'FWL-04',
       facultyName: 'Dr. A. Manchula',
       day: 'WED',
       period: 'P7',
       room: 'Seminar Hall 2',
-      sessionType: 'OTHER',
+      sessionType: 'TUTORIAL',
       duration: 1,
     },
 
-    // =========================================================================
-    // THURSDAY (7 periods)
-    // =========================================================================
+    // --- THURSDAY ---
     {
       timetableVersionId: version._id,
       academicContextId: context._id,
-      courseCode: '22MAN8R',
-      courseName: 'Soft/Analytical Skills - IV',
-      facultyId: 'FWL-12',
-      facultyName: 'Mrs. K. Eswari',
+      courseCode: '22CSP04',
+      courseName: 'Algorithms Laboratory',
+      facultyId: 'FWL-06',
+      facultyName: 'Mrs. E. Padma',
       day: 'THU',
       period: 'P1',
-      room: 'LH-101',
-      sessionType: 'THEORY',
-      duration: 1,
+      room: 'Algorithms Lab',
+      sessionType: 'LAB',
+      duration: 2,
     },
     {
       timetableVersionId: version._id,
       academicContextId: context._id,
-      courseCode: '22CSC14',
-      courseName: 'Principles of Compiler Design',
-      facultyId: 'FWL-04',
-      facultyName: 'Dr. A. Manchula',
+      courseCode: '22CSP04',
+      courseName: 'Algorithms Laboratory',
+      facultyId: 'FWL-06',
+      facultyName: 'Mrs. E. Padma',
       day: 'THU',
       period: 'P2',
-      room: 'LH-101',
-      sessionType: 'THEORY',
-      duration: 1,
+      room: 'Algorithms Lab',
+      sessionType: 'LAB',
+      duration: 2,
     },
     {
       timetableVersionId: version._id,
@@ -394,7 +372,7 @@ async function seedTimetable() {
       timetableVersionId: version._id,
       academicContextId: context._id,
       courseCode: '22CSX42',
-      courseName: 'UI and UX Design',
+      courseName: 'UI and UX Design (PSE)',
       facultyId: 'FWL-06',
       facultyName: 'Mrs. E. Padma',
       day: 'THU',
@@ -407,7 +385,7 @@ async function seedTimetable() {
       timetableVersionId: version._id,
       academicContextId: context._id,
       courseCode: '22CSC15',
-      courseName: 'Full Stack Development',
+      courseName: 'Full Stack Development (PBL)',
       facultyId: 'FWL-14',
       facultyName: 'Ms. D. Vinoparkavi',
       day: 'THU',
@@ -419,23 +397,23 @@ async function seedTimetable() {
     {
       timetableVersionId: version._id,
       academicContextId: context._id,
-      courseCode: 'STUDY',
-      courseName: 'Self-Study & Placement Practice',
-      facultyId: 'FWL-14',
-      facultyName: 'Ms. D. Vinoparkavi',
+      courseCode: '22CSC14',
+      courseName: 'Principles of Compiler Design',
+      facultyId: 'FWL-04',
+      facultyName: 'Dr. A. Manchula',
       day: 'THU',
       period: 'P6',
       room: 'LH-101',
-      sessionType: 'OTHER',
+      sessionType: 'THEORY',
       duration: 1,
     },
     {
       timetableVersionId: version._id,
       academicContextId: context._id,
-      courseCode: 'MENTORING',
-      courseName: 'Mentor Proctoring & Interaction',
-      facultyId: 'FWL-03',
-      facultyName: 'Dr. S. Karpusamy',
+      courseCode: '22CSL04',
+      courseName: 'Aptitude & Soft Skills Training',
+      facultyId: 'FWL-12',
+      facultyName: 'Mrs. K. Eswari',
       day: 'THU',
       period: 'P7',
       room: 'LH-101',
@@ -443,16 +421,14 @@ async function seedTimetable() {
       duration: 1,
     },
 
-    // =========================================================================
-    // FRIDAY (7 periods)
-    // =========================================================================
+    // --- FRIDAY ---
     {
       timetableVersionId: version._id,
       academicContextId: context._id,
-      courseCode: '22CSC14',
-      courseName: 'Principles of Compiler Design',
-      facultyId: 'FWL-04',
-      facultyName: 'Dr. A. Manchula',
+      courseCode: '22CSC16',
+      courseName: 'Object Oriented Software Engineering',
+      facultyId: 'FWL-03',
+      facultyName: 'Dr. S. Karpusamy',
       day: 'FRI',
       period: 'P1',
       room: 'LH-101',
@@ -462,10 +438,10 @@ async function seedTimetable() {
     {
       timetableVersionId: version._id,
       academicContextId: context._id,
-      courseCode: '22CSX21',
-      courseName: 'Fundamentals of Cryptography and Network Security',
-      facultyId: 'FWL-12',
-      facultyName: 'Mrs. K. Eswari',
+      courseCode: '22CSC15',
+      courseName: 'Full Stack Development (PBL)',
+      facultyId: 'FWL-14',
+      facultyName: 'Ms. D. Vinoparkavi',
       day: 'FRI',
       period: 'P2',
       room: 'LH-101',
@@ -475,8 +451,8 @@ async function seedTimetable() {
     {
       timetableVersionId: version._id,
       academicContextId: context._id,
-      courseCode: '22MAN8R',
-      courseName: 'Soft/Analytical Skills - IV',
+      courseCode: '22CSX21',
+      courseName: 'Fundamentals of Cryptography and Network Security (PSE)',
       facultyId: 'FWL-12',
       facultyName: 'Mrs. K. Eswari',
       day: 'FRI',
@@ -488,46 +464,46 @@ async function seedTimetable() {
     {
       timetableVersionId: version._id,
       academicContextId: context._id,
-      courseCode: 'STUDY',
-      courseName: 'Self-Study & Practice',
+      courseCode: '22CSC14',
+      courseName: 'Principles of Compiler Design',
       facultyId: 'FWL-04',
       facultyName: 'Dr. A. Manchula',
       day: 'FRI',
       period: 'P4',
       room: 'LH-101',
-      sessionType: 'OTHER',
+      sessionType: 'THEORY',
       duration: 1,
     },
     {
       timetableVersionId: version._id,
       academicContextId: context._id,
-      courseCode: 'STUDY',
-      courseName: 'Self-Study & Revision',
+      courseCode: '22CSP01',
+      courseName: 'Project Work Phase I',
       facultyId: 'FWL-03',
       facultyName: 'Dr. S. Karpusamy',
       day: 'FRI',
       period: 'P5',
       room: 'LH-101',
-      sessionType: 'OTHER',
+      sessionType: 'PBL',
       duration: 1,
     },
     {
       timetableVersionId: version._id,
       academicContextId: context._id,
-      courseCode: 'STUDY',
-      courseName: 'Placement Aptitude Practice',
-      facultyId: 'FWL-12',
-      facultyName: 'Mrs. K. Eswari',
+      courseCode: '22CSX42',
+      courseName: 'UI and UX Design (PSE)',
+      facultyId: 'FWL-06',
+      facultyName: 'Mrs. E. Padma',
       day: 'FRI',
       period: 'P6',
       room: 'LH-101',
-      sessionType: 'OTHER',
+      sessionType: 'THEORY',
       duration: 1,
     },
     {
       timetableVersionId: version._id,
       academicContextId: context._id,
-      courseCode: 'SPORTS',
+      courseCode: '22CSS02',
       courseName: 'Sports & Extracurriculars',
       facultyId: 'FWL-03',
       facultyName: 'Dr. S. Karpusamy',
@@ -540,86 +516,31 @@ async function seedTimetable() {
   ];
 
   const inserted = await TimetableSession.insertMany(sessions);
-  console.log(`[Seed] Successfully seeded ${inserted.length} canonical timetable sessions across Mon-Fri.`);
+  console.log(`[Seed] Successfully seeded ${inserted.length} timetable sessions across Mon-Fri.`);
 
-  // Seed authoritative HOD faculty allocations for all curriculum courses
+  // Seed authoritative HOD faculty allocations for all scheduled curriculum courses
   await HODFacultyAllocation.deleteMany({});
   const hodAllocsMap = new Map();
 
-  // Authoritative allocations for III Year Section A (Semester V)
-  const sem5Authoritative = [
-    {
-      code: '22CSC14',
-      name: 'Principles of Compiler Design',
-      facultyId: 'FWL-04',
-      facultyName: 'Dr. A. Manchula',
-      type: 'THEORY',
-    },
-    {
-      code: '22CSC15',
-      name: 'Full Stack Development',
-      facultyId: 'FWL-14',
-      facultyName: 'Ms. D. Vinoparkavi',
-      type: 'THEORY',
-    },
-    {
-      code: '22CSC16',
-      name: 'Object Oriented Software Engineering',
-      facultyId: 'FWL-03',
-      facultyName: 'Dr. S. Karpusamy',
-      type: 'THEORY',
-    },
-    {
-      code: '22CSP09',
-      name: 'Full Stack Development Laboratory',
-      facultyId: 'FWL-14',
-      facultyName: 'Ms. D. Vinoparkavi',
-      type: 'LAB_PRIMARY',
-    },
-    {
-      code: '22CSP10',
-      name: 'Object Oriented Software Engineering Laboratory',
-      facultyId: 'FWL-03',
-      facultyName: 'Dr. S. Karpusamy',
-      type: 'LAB_PRIMARY',
-    },
-    {
-      code: '22MAN8R',
-      name: 'Soft/Analytical Skills - IV',
-      facultyId: 'FWL-12',
-      facultyName: 'Mrs. K. Eswari',
-      type: 'THEORY',
-    },
-    {
-      code: '22CSX42',
-      name: 'UI and UX Design',
-      facultyId: 'FWL-06',
-      facultyName: 'Mrs. E. Padma',
-      type: 'THEORY',
-    },
-    {
-      code: '22CSX21',
-      name: 'Fundamentals of Cryptography and Network Security',
-      facultyId: 'FWL-12',
-      facultyName: 'Mrs. K. Eswari',
-      type: 'THEORY',
-    },
-  ];
-
-  sem5Authoritative.forEach((item) => {
-    hodAllocsMap.set(`${context._id}_${item.code}`, {
-      academicContextId: context._id,
-      courseCode: item.code,
-      courseName: item.name,
-      facultyId: item.facultyId,
-      facultyName: item.facultyName,
-      allocationType: item.type,
-      assignedBy: 'Dr. T. Rajasekaran (HOD)',
-      status: 'APPROVED',
-    });
+  sessions.forEach((s) => {
+    if (s.courseCode && !s.courseCode.startsWith('22CSS')) {
+      const key = `${s.academicContextId}_${s.courseCode}`;
+      if (!hodAllocsMap.has(key)) {
+        hodAllocsMap.set(key, {
+          academicContextId: s.academicContextId,
+          courseCode: s.courseCode,
+          courseName: s.courseName,
+          facultyId: s.facultyId,
+          facultyName: s.facultyName,
+          allocationType: s.sessionType === 'LAB' ? 'LAB_PRIMARY' : 'THEORY',
+          assignedBy: 'Dr. T. Rajasekaran (HOD)',
+          status: 'APPROVED',
+        });
+      }
+    }
   });
 
-  // Authoritative allocations for II Year Section A (Semester III)
+  // Also add allocation for II Year A and IV Year A
   const iiYearA = await AcademicContext.findOne({ year: 'II Year', section: 'A' });
   if (iiYearA) {
     hodAllocsMap.set(`${iiYearA._id}_22CSC06`, {
@@ -634,19 +555,8 @@ async function seedTimetable() {
     });
   }
 
-  // Authoritative allocations for IV Year Section A (Semester VII)
   const ivYearA = await AcademicContext.findOne({ year: 'IV Year', section: 'A' });
   if (ivYearA) {
-    hodAllocsMap.set(`${ivYearA._id}_22GEA01`, {
-      academicContextId: ivYearA._id,
-      courseCode: '22GEA01',
-      courseName: 'Universal Human Values',
-      facultyId: 'FWL-01',
-      facultyName: 'Dr. M. Bhuvaneswari',
-      allocationType: 'THEORY',
-      assignedBy: 'Dr. T. Rajasekaran (HOD)',
-      status: 'APPROVED',
-    });
     hodAllocsMap.set(`${ivYearA._id}_22CSC21`, {
       academicContextId: ivYearA._id,
       courseCode: '22CSC21',
