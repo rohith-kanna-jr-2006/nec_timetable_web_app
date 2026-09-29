@@ -2,7 +2,6 @@ import React, { useState, useEffect } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { getFacultyTimetable } from '../../services/timetableService';
 import PageHeader from '../../components/common/PageHeader';
-import Breadcrumbs from '../../components/layout/Breadcrumbs';
 import Card from '../../components/common/Card';
 import Badge from '../../components/common/Badge';
 import Button from '../../components/common/Button';
@@ -26,6 +25,9 @@ export default function FacultyTimetablePage() {
   const facultyId = user?.facultyId || user?.id || 'FAC01';
   const facultyName = user?.name || user?.facultyName || 'Faculty Member';
 
+  // Filter only regular academic periods (excluding standalone breaks)
+  const academicPeriods = PERIOD_TIMINGS.filter((p) => Boolean(p.period));
+
   const loadSchedule = async () => {
     try {
       setLoading(true);
@@ -34,17 +36,17 @@ export default function FacultyTimetablePage() {
       const sessions = res?.sessions || res?.data?.sessions || [];
       setSessionCount(sessions.length);
 
-      // Build 2D matrix: [day][period] -> session
+      // Build 2D matrix: [dayId][periodCode] -> session
       const matrix = {};
       WEEK_DAYS.forEach((d) => {
-        matrix[d.code] = {};
+        matrix[d.id] = {};
       });
 
       sessions.forEach((s) => {
-        const dayCode = (s.day || '').toUpperCase();
+        const dayId = (s.day || '').toUpperCase();
         const periodCode = (s.period || '').toUpperCase();
-        if (matrix[dayCode]) {
-          matrix[dayCode][periodCode] = s;
+        if (matrix[dayId]) {
+          matrix[dayId][periodCode] = s;
         }
       });
 
@@ -119,20 +121,53 @@ export default function FacultyTimetablePage() {
           </div>
         ) : (
           <div>
-            <div style={{ padding: '8px 14px', fontSize: '0.75rem', color: 'var(--color-on-surface-variant)', background: 'var(--color-surface-container-low)', borderBottom: '1px solid var(--color-surface-container)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <div
+              style={{
+                padding: '8px 14px',
+                fontSize: '0.75rem',
+                color: 'var(--color-on-surface-variant)',
+                background: 'var(--color-surface-container-low)',
+                borderBottom: '1px solid var(--color-surface-container)',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+              }}
+            >
               <span>↔️</span>
               <span>Scroll horizontally to view all 7 periods</span>
             </div>
             <div className="ui-table-scroll-container">
-              <table style={{ width: '100%', minWidth: '880px', borderCollapse: 'collapse', textAlign: 'center', fontSize: '0.8125rem' }}>
+              <table
+                style={{
+                  width: '100%',
+                  minWidth: '880px',
+                  borderCollapse: 'collapse',
+                  textAlign: 'center',
+                  fontSize: '0.8125rem',
+                }}
+              >
                 <thead>
-                  <tr style={{ backgroundColor: 'var(--color-surface-container-low)', borderBottom: '2px solid var(--color-surface-container)' }}>
-                    <th style={{ padding: '12px 14px', fontWeight: 700, width: '110px', textAlign: 'left' }}>Day / Period</th>
-                    {PERIOD_TIMINGS.map((p) => (
-                      <th key={p.period} style={{ padding: '10px 8px', fontWeight: 600, borderLeft: '1px solid var(--color-surface-container)' }}>
+                  <tr
+                    style={{
+                      backgroundColor: 'var(--color-surface-container-low)',
+                      borderBottom: '2px solid var(--color-surface-container)',
+                    }}
+                  >
+                    <th style={{ padding: '12px 14px', fontWeight: 700, width: '110px', textAlign: 'left' }}>
+                      Day / Period
+                    </th>
+                    {academicPeriods.map((p) => (
+                      <th
+                        key={p.period}
+                        style={{
+                          padding: '10px 8px',
+                          fontWeight: 600,
+                          borderLeft: '1px solid var(--color-surface-container)',
+                        }}
+                      >
                         <div>{p.period}</div>
                         <div style={{ fontSize: '0.7rem', fontWeight: 400, color: 'var(--color-outline)', marginTop: '2px' }}>
-                          {p.timing}
+                          {p.label || `${p.startTime} – ${p.endTime}`}
                         </div>
                       </th>
                     ))}
@@ -140,12 +175,21 @@ export default function FacultyTimetablePage() {
                 </thead>
                 <tbody>
                   {WEEK_DAYS.map((d) => (
-                    <tr key={d.code} style={{ borderBottom: '1px solid var(--color-surface-container)' }}>
-                      <td style={{ padding: '14px', fontWeight: 700, backgroundColor: 'var(--color-surface-container-lowest)', textAlign: 'left', borderRight: '1px solid var(--color-surface-container)' }}>
+                    <tr key={d.id} style={{ borderBottom: '1px solid var(--color-surface-container)' }}>
+                      <td
+                        style={{
+                          padding: '14px',
+                          fontWeight: 700,
+                          backgroundColor: 'var(--color-surface-container-lowest)',
+                          textAlign: 'left',
+                          borderRight: '1px solid var(--color-surface-container)',
+                        }}
+                      >
                         {d.label}
                       </td>
-                      {PERIOD_TIMINGS.map((p) => {
-                        const session = scheduleMatrix[d.code]?.[p.period];
+                      {academicPeriods.map((p) => {
+                        const session = scheduleMatrix[d.id]?.[p.period];
+                        const isLab = session?.sessionType === 'LAB';
                         return (
                           <td
                             key={p.period}
@@ -154,19 +198,39 @@ export default function FacultyTimetablePage() {
                               borderLeft: '1px solid var(--color-surface-container)',
                               height: '76px',
                               verticalAlign: 'middle',
-                              backgroundColor: session ? 'rgba(16, 185, 129, 0.05)' : 'transparent',
+                              backgroundColor: session
+                                ? isLab
+                                  ? 'rgba(234, 179, 8, 0.08)'
+                                  : 'rgba(16, 185, 129, 0.05)'
+                                : 'transparent',
                             }}
                           >
                             {session ? (
                               <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-                                <span style={{ fontWeight: 700, color: 'var(--color-primary)' }}>
+                                <span
+                                  style={{
+                                    fontWeight: 700,
+                                    color: isLab ? 'var(--color-warning)' : 'var(--color-primary)',
+                                  }}
+                                >
                                   {session.courseCode}
                                 </span>
-                                <span style={{ fontSize: '0.75rem', fontWeight: 500, color: 'var(--color-on-surface)' }}>
+                                <span
+                                  style={{
+                                    fontSize: '0.75rem',
+                                    fontWeight: 500,
+                                    color: 'var(--color-on-surface)',
+                                    overflow: 'hidden',
+                                    textOverflow: 'ellipsis',
+                                    whiteSpace: 'nowrap',
+                                  }}
+                                  title={session.courseName || session.title}
+                                >
                                   {session.courseName || session.title}
                                 </span>
                                 <span style={{ fontSize: '0.7rem', color: 'var(--color-outline)' }}>
-                                  Class: {session.year ? `Yr ${session.year}` : ''} {session.section ? `Sec ${session.section}` : session.room || 'Classroom'}
+                                  Class: {session.year ? `Yr ${session.year}` : ''}{' '}
+                                  {session.section ? `Sec ${session.section}` : session.room || 'Classroom'}
                                 </span>
                               </div>
                             ) : (

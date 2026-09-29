@@ -73,6 +73,7 @@ export default function AppRoutes() {
           <Route path="faculty-timetable" element={<FacultyTimetablePage />} />
           
           {/* Backwards-compatible aliases */}
+          <Route path="classes" element={<Navigate to="/faculty/class-timetable" replace />} />
           <Route path="timetable" element={<Navigate to="/faculty/faculty-timetable" replace />} />
           <Route path="weekly-timetable" element={<Navigate to="/faculty/class-timetable" replace />} />
 

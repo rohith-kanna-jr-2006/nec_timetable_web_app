@@ -1,13 +1,12 @@
 import React, { useState, useEffect } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
 import { getClassTimetable } from '../../services/timetableService';
 import { getAcademicContexts } from '../../services/academicContextService';
 import PageHeader from '../../components/common/PageHeader';
-import Breadcrumbs from '../../components/layout/Breadcrumbs';
 import Card from '../../components/common/Card';
 import Badge from '../../components/common/Badge';
-import Button from '../../components/common/Button';
 import Select from '../../components/common/Select';
 import Spinner from '../../components/common/Spinner';
 import ErrorState from '../../components/common/ErrorState';
@@ -22,12 +21,18 @@ import { WEEK_DAYS, PERIOD_TIMINGS } from '../../constants/schedule';
 export default function ClassTimetablePage() {
   const { user } = useAuth();
   const { showToast } = useToast();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const queryContextId = searchParams.get('academicContextId');
+
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [contexts, setContexts] = useState([]);
-  const [selectedContextId, setSelectedContextId] = useState('');
+  const [selectedContextId, setSelectedContextId] = useState(queryContextId || '');
   const [timetableMatrix, setTimetableMatrix] = useState({});
   const [totalSessions, setTotalSessions] = useState(0);
+
+  // Filter only regular academic periods (excluding standalone breaks)
+  const academicPeriods = PERIOD_TIMINGS.filter((p) => Boolean(p.period));
 
   // Load cohort contexts
   useEffect(() => {
@@ -39,7 +44,11 @@ export default function ClassTimetablePage() {
         setContexts(list);
 
         if (list.length > 0) {
-          setSelectedContextId(list[0]._id);
+          if (queryContextId && list.some((c) => (c._id || c.id) === queryContextId)) {
+            setSelectedContextId(queryContextId);
+          } else if (!selectedContextId) {
+            setSelectedContextId(list[0]._id || list[0].id);
+          }
         } else {
           setLoading(false);
         }
@@ -50,7 +59,7 @@ export default function ClassTimetablePage() {
       }
     }
     initContexts();
-  }, []);
+  }, [queryContextId]);
 
   // Load timetable matrix when selected cohort changes
   useEffect(() => {
@@ -64,17 +73,17 @@ export default function ClassTimetablePage() {
         const sessions = res?.sessions || res?.data?.sessions || [];
         setTotalSessions(sessions.length);
 
-        // Build 2D matrix: [day][period] -> session
+        // Build 2D matrix: [dayId][periodCode] -> session
         const matrix = {};
         WEEK_DAYS.forEach((d) => {
-          matrix[d.code] = {};
+          matrix[d.id] = {};
         });
 
         sessions.forEach((s) => {
-          const dayCode = (s.day || '').toUpperCase();
+          const dayId = (s.day || '').toUpperCase();
           const periodCode = (s.period || '').toUpperCase();
-          if (matrix[dayCode]) {
-            matrix[dayCode][periodCode] = s;
+          if (matrix[dayId]) {
+            matrix[dayId][periodCode] = s;
           }
         });
 
@@ -91,10 +100,20 @@ export default function ClassTimetablePage() {
     loadSchedule();
   }, [selectedContextId]);
 
-  const activeContext = contexts.find((c) => c._id === selectedContextId);
+  const activeContext = contexts.find((c) => (c._id || c.id) === selectedContextId);
   const contextLabel = activeContext
     ? `${activeContext.department || 'CSE'} — Year ${activeContext.year || 'II'} / Sem ${activeContext.semester || 'III'} — Section ${activeContext.section || 'A'}`
     : 'Selected Class';
+
+  const handleContextChange = (e) => {
+    const nextId = e.target.value;
+    setSelectedContextId(nextId);
+    if (nextId) {
+      setSearchParams({ academicContextId: nextId }, { replace: true });
+    } else {
+      setSearchParams({}, { replace: true });
+    }
+  };
 
   return (
     <div>
@@ -111,12 +130,12 @@ export default function ClassTimetablePage() {
             <span style={{ fontSize: '0.8125rem', fontWeight: 600, color: 'var(--color-outline)' }}>Class Cohort:</span>
             <Select
               value={selectedContextId}
-              onChange={(e) => setSelectedContextId(e.target.value)}
+              onChange={handleContextChange}
               options={contexts.map((c) => ({
-                value: c._id,
+                value: c._id || c.id,
                 label: `${c.department || 'CSE'} Yr ${c.year || ''} Sem ${c.semester || ''} Sec ${c.section || ''} (${c.academicYear || ''})`,
               }))}
-              style={{ minWidth: '220px', height: '36px' }}
+              style={{ minWidth: '240px', height: '36px' }}
             />
           </div>
         }
@@ -162,20 +181,53 @@ export default function ClassTimetablePage() {
           </div>
         ) : (
           <div>
-            <div style={{ padding: '8px 14px', fontSize: '0.75rem', color: 'var(--color-on-surface-variant)', background: 'var(--color-surface-container-low)', borderBottom: '1px solid var(--color-surface-container)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <div
+              style={{
+                padding: '8px 14px',
+                fontSize: '0.75rem',
+                color: 'var(--color-on-surface-variant)',
+                background: 'var(--color-surface-container-low)',
+                borderBottom: '1px solid var(--color-surface-container)',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+              }}
+            >
               <span>↔️</span>
               <span>Scroll horizontally to view all 7 periods</span>
             </div>
             <div className="ui-table-scroll-container">
-              <table style={{ width: '100%', minWidth: '880px', borderCollapse: 'collapse', textAlign: 'center', fontSize: '0.8125rem' }}>
+              <table
+                style={{
+                  width: '100%',
+                  minWidth: '880px',
+                  borderCollapse: 'collapse',
+                  textAlign: 'center',
+                  fontSize: '0.8125rem',
+                }}
+              >
                 <thead>
-                  <tr style={{ backgroundColor: 'var(--color-surface-container-low)', borderBottom: '2px solid var(--color-surface-container)' }}>
-                    <th style={{ padding: '12px 14px', fontWeight: 700, width: '110px', textAlign: 'left' }}>Day / Period</th>
-                    {PERIOD_TIMINGS.map((p) => (
-                      <th key={p.period} style={{ padding: '10px 8px', fontWeight: 600, borderLeft: '1px solid var(--color-surface-container)' }}>
+                  <tr
+                    style={{
+                      backgroundColor: 'var(--color-surface-container-low)',
+                      borderBottom: '2px solid var(--color-surface-container)',
+                    }}
+                  >
+                    <th style={{ padding: '12px 14px', fontWeight: 700, width: '110px', textAlign: 'left' }}>
+                      Day / Period
+                    </th>
+                    {academicPeriods.map((p) => (
+                      <th
+                        key={p.period}
+                        style={{
+                          padding: '10px 8px',
+                          fontWeight: 600,
+                          borderLeft: '1px solid var(--color-surface-container)',
+                        }}
+                      >
                         <div>{p.period}</div>
                         <div style={{ fontSize: '0.7rem', fontWeight: 400, color: 'var(--color-outline)', marginTop: '2px' }}>
-                          {p.timing}
+                          {p.label || `${p.startTime} – ${p.endTime}`}
                         </div>
                       </th>
                     ))}
@@ -183,12 +235,21 @@ export default function ClassTimetablePage() {
                 </thead>
                 <tbody>
                   {WEEK_DAYS.map((d) => (
-                    <tr key={d.code} style={{ borderBottom: '1px solid var(--color-surface-container)' }}>
-                      <td style={{ padding: '14px', fontWeight: 700, backgroundColor: 'var(--color-surface-container-lowest)', textAlign: 'left', borderRight: '1px solid var(--color-surface-container)' }}>
+                    <tr key={d.id} style={{ borderBottom: '1px solid var(--color-surface-container)' }}>
+                      <td
+                        style={{
+                          padding: '14px',
+                          fontWeight: 700,
+                          backgroundColor: 'var(--color-surface-container-lowest)',
+                          textAlign: 'left',
+                          borderRight: '1px solid var(--color-surface-container)',
+                        }}
+                      >
                         {d.label}
                       </td>
-                      {PERIOD_TIMINGS.map((p) => {
-                        const session = timetableMatrix[d.code]?.[p.period];
+                      {academicPeriods.map((p) => {
+                        const session = timetableMatrix[d.id]?.[p.period];
+                        const isLab = session?.sessionType === 'LAB';
                         return (
                           <td
                             key={p.period}
@@ -197,20 +258,44 @@ export default function ClassTimetablePage() {
                               borderLeft: '1px solid var(--color-surface-container)',
                               height: '76px',
                               verticalAlign: 'middle',
-                              backgroundColor: session ? 'rgba(37, 99, 235, 0.04)' : 'transparent',
+                              backgroundColor: session
+                                ? isLab
+                                  ? 'rgba(234, 179, 8, 0.08)'
+                                  : 'rgba(37, 99, 235, 0.04)'
+                                : 'transparent',
                             }}
                           >
                             {session ? (
                               <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-                                <span style={{ fontWeight: 700, color: 'var(--color-primary)' }}>
+                                <span
+                                  style={{
+                                    fontWeight: 700,
+                                    color: isLab ? 'var(--color-warning)' : 'var(--color-primary)',
+                                  }}
+                                >
                                   {session.courseCode}
                                 </span>
-                                <span style={{ fontSize: '0.75rem', fontWeight: 500, color: 'var(--color-on-surface)' }}>
+                                <span
+                                  style={{
+                                    fontSize: '0.75rem',
+                                    fontWeight: 500,
+                                    color: 'var(--color-on-surface)',
+                                    overflow: 'hidden',
+                                    textOverflow: 'ellipsis',
+                                    whiteSpace: 'nowrap',
+                                  }}
+                                  title={session.courseName || session.title}
+                                >
                                   {session.courseName || session.title}
                                 </span>
                                 <span style={{ fontSize: '0.7rem', color: 'var(--color-outline)' }}>
                                   Faculty: {session.facultyName || session.facultyId || 'Instructor'}
                                 </span>
+                                {session.room && (
+                                  <span style={{ fontSize: '0.6875rem', color: 'var(--color-on-surface-variant)' }}>
+                                    Room: {session.room}
+                                  </span>
+                                )}
                               </div>
                             ) : (
                               <span style={{ color: 'var(--color-outline)', fontSize: '0.75rem' }}>—</span>

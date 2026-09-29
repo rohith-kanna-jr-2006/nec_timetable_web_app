@@ -40,6 +40,16 @@ export async function getTimetableVersions(params = {}) {
 }
 
 /**
+ * Solve and generate timetable automatically using backend CSP engine
+ * POST /api/timetable/solve
+ */
+export async function solveTimetable(payload) {
+  const response = await api.post('/timetable/solve', payload);
+  return response?.data || response;
+}
+
+
+/**
  * Get current system day identifier ('MON', 'TUE', 'WED', 'THU', 'FRI')
  * Defaults to 'MON' if accessed on weekends
  */
@@ -161,6 +171,7 @@ export const timetableService = {
   getFacultyTimetable,
   getClassTimetable,
   getTimetableVersions,
+  solveTimetable,
   getCurrentDayId,
   getCurrentPeriodStatus,
   groupSessionsByDay,
