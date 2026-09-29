@@ -49,7 +49,7 @@ export default function OptimizationSolverPage() {
       const [verRes, ctxRes, crsRes, facRes, hodRes] = await Promise.allSettled([
         getTimetableVersions(),
         getAcademicContexts(),
-        getCourses(),
+        getCourses({ limit: 500 }),
         getFacultyList({ limit: 100 }),
         getHODAllocations(),
       ]);
@@ -66,7 +66,9 @@ export default function OptimizationSolverPage() {
 
       let crsList = [];
       if (crsRes.status === 'fulfilled' && crsRes.value) {
-        crsList = Array.isArray(crsRes.value) ? crsRes.value : crsRes.value.data || [];
+        crsList = Array.isArray(crsRes.value) 
+          ? crsRes.value 
+          : crsRes.value.items || crsRes.value.data?.items || crsRes.value.data || [];
         setCourses(crsList);
       }
 
@@ -112,7 +114,13 @@ export default function OptimizationSolverPage() {
   const uniqueSemesters = [...new Set(contexts.filter(c => c.year === selectedYear).map(c => c.semester))].filter(Boolean);
   const sections = contexts.filter(c => c.year === selectedYear && c.semester === selectedSemester);
   
-  const validCourses = courses.filter(c => c.semester === selectedSemester);
+  const yearToCurriculumSemester = {
+    'II Year': 'Semester III',
+    'III Year': 'Semester V',
+    'IV Year': 'Semester VII'
+  };
+  const targetCurriculumSemester = yearToCurriculumSemester[selectedYear] || selectedSemester;
+  const validCourses = courses.filter(c => c.semester === targetCurriculumSemester);
 
   // Auto-resolve selected course to initialize default
   useEffect(() => {

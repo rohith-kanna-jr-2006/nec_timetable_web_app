@@ -15,6 +15,7 @@ export async function getCourses(params = {}) {
   if (params.regulation) query.append('regulation', params.regulation);
   if (params.semester) query.append('semester', params.semester);
   if (params.type) query.append('type', params.type);
+  if (params.limit) query.append('limit', params.limit);
 
   const qs = query.toString();
   const endpoint = `/courses${qs ? `?${qs}` : ''}`;
