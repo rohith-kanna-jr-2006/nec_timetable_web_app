@@ -47,6 +47,15 @@ export async function updateHODAllocationStatus(id, status, rejectionReason = nu
 }
 
 /**
+ * Update HOD allocation (reassign faculty, allocationType, etc.)
+ * PUT /api/hod-allocations/:id
+ */
+export async function updateHODAllocation(id, payload) {
+  const response = await api.put(`/hod-allocations/${encodeURIComponent(id)}`, payload);
+  return response?.data || response;
+}
+
+/**
  * Delete allocation
  * DELETE /api/hod-allocations/:id
  */

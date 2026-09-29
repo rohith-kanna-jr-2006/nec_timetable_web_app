@@ -32,6 +32,13 @@ const YEAR_TO_SEMESTER_ODD = {
   'IV YEAR': 'Semester VII', '4': 'Semester VII', 'IV': 'Semester VII',
 };
 
+const YEAR_TO_SEMESTER_EVEN = {
+  'I YEAR': 'Semester II', '1': 'Semester II', 'I': 'Semester II',
+  'II YEAR': 'Semester IV', '2': 'Semester IV', 'II': 'Semester IV',
+  'III YEAR': 'Semester VI', '3': 'Semester VI', 'III': 'Semester VI',
+  'IV YEAR': 'Semester VIII', '4': 'Semester VIII', 'IV': 'Semester VIII',
+};
+
 /**
  * Get courses list with filters and pagination
  * GET /api/courses
@@ -59,8 +66,10 @@ async function getCourses(req, res, next) {
     if (academicContextId) {
       const context = await AcademicContext.findById(academicContextId);
       if (context) {
+        const isEven = /even/i.test(context.semester);
+        const mapToUse = isEven ? YEAR_TO_SEMESTER_EVEN : YEAR_TO_SEMESTER_ODD;
         const ctxYearUpper = (context.year || '').toUpperCase().trim();
-        const mappedSem = YEAR_TO_SEMESTER_ODD[ctxYearUpper];
+        const mappedSem = mapToUse[ctxYearUpper];
         if (mappedSem && !semester) {
           query.semester = { $regex: `^${mappedSem}$`, $options: 'i' };
         }
@@ -108,7 +117,7 @@ async function getCourses(req, res, next) {
 
     if (semester) {
       const sem = semester.trim();
-      const semClean = sem.replace(/^semester\s+/i, '').trim().toUpperCase();
+      const semClean = sem.replace(/^(semester|sem)\.?\s*/i, '').trim().toUpperCase();
       const roman = NUMERAL_TO_ROMAN[semClean];
       if (roman) {
         query.semester = { $regex: `^Semester ${roman}$`, $options: 'i' };

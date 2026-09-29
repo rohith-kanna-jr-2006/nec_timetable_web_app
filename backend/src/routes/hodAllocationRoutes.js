@@ -15,6 +15,7 @@ router.post(
   hodAllocationController.createAllocation
 );
 router.patch('/:id/status', authenticateUser, requireRole('HOD', 'ADMIN'), hodAllocationController.updateStatus);
+router.put('/:id', authenticateUser, requireRole('HOD', 'ADMIN'), hodAllocationController.updateAllocation);
 router.delete('/:id', authenticateUser, requireRole('HOD', 'ADMIN'), hodAllocationController.deleteAllocation);
 
 module.exports = router;

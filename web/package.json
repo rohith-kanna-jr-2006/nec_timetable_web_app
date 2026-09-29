@@ -6,8 +6,8 @@
   "scripts": {
     "start": "webpack serve --mode development --config webpack.config.js",
     "dev": "webpack serve --mode development --config webpack.config.js",
-    "build": "webpack --mode production --config webpack.config.js",
-    "test": "node tests/auth.test.js && node tests/timetable.test.js && node tests/facultyWorkflow.test.js && node tests/frontendServices.test.js"
+    "build": "node --max-old-space-size=4096 ./node_modules/webpack/bin/webpack.js --mode production --config webpack.config.js",
+    "test": "node tests/auth.test.js && node tests/timetable.test.js && node tests/facultyWorkflow.test.js && node tests/frontendServices.test.js && node tests/assignmentPlan.test.js"
   },
   "dependencies": {
     "react": "^18.3.1",

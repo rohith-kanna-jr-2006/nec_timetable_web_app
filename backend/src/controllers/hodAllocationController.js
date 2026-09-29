@@ -135,6 +135,44 @@ async function updateStatus(req, res, next) {
 }
 
 /**
+ * Update an allocation (e.g. reassign faculty)
+ * PUT /api/hod-allocations/:id
+ */
+async function updateAllocation(req, res, next) {
+  try {
+    const { id } = req.params;
+    const { facultyId, facultyName, allocationType, status } = req.body;
+
+    let resolvedFacultyName = facultyName;
+    if (facultyId && !resolvedFacultyName) {
+      const fac = await Faculty.findOne({ facultyId });
+      if (fac) resolvedFacultyName = fac.facultyName;
+    }
+
+    const updateData = {};
+    if (facultyId) updateData.facultyId = facultyId;
+    if (resolvedFacultyName) updateData.facultyName = resolvedFacultyName;
+    if (allocationType) updateData.allocationType = allocationType;
+    if (status) updateData.status = status;
+    updateData.assignedBy = req.user ? req.user.name || req.user.email : 'HOD';
+
+    const updated = await HODFacultyAllocation.findByIdAndUpdate(
+      id,
+      { $set: updateData },
+      { new: true, runValidators: true }
+    );
+
+    if (!updated) {
+      return errorResponse(res, 'Allocation not found', 404, 'NOT_FOUND');
+    }
+
+    return successResponse(res, updated);
+  } catch (error) {
+    next(error);
+  }
+}
+
+/**
  * Delete an allocation
  * DELETE /api/hod-allocations/:id
  */
@@ -154,6 +192,7 @@ async function deleteAllocation(req, res, next) {
 module.exports = {
   getAllocations,
   createAllocation,
+  updateAllocation,
   updateStatus,
   deleteAllocation,
 };
