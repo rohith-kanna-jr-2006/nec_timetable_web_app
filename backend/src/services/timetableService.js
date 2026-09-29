@@ -1,5 +1,7 @@
 const TimetableVersion = require('../models/TimetableVersion');
 const TimetableSession = require('../models/TimetableSession');
+const { buildSchedulingContext } = require('./timetable/constraintBuilder');
+const { solveTimetable } = require('./timetable/timetableSolver');
 
 const ALLOWED_TRANSITIONS = {
   NO_TIMETABLE: ['GENERATED', 'DRAFT'],
@@ -64,6 +66,64 @@ async function transitionTimetableStatus(versionId, targetStatus, user, meta = {
 }
 
 /**
+ * Solves timetable using CSP engine and persists generated sessions atomically.
+ *
+ * @param {Object} input - { academicContextId, timetableVersionId, assignmentPlan, generationSeed, options }
+ * @param {Object} user - Requester user object
+ * @returns {Object} Solution result with persisted sessions and metrics
+ */
+async function solveAndPersistTimetable(input, user = {}) {
+  // 1. Build problem context & validate authoritative allocations
+  const problemSpec = await buildSchedulingContext(input);
+
+  // 2. Run in-memory CSP solver
+  const solverOptions = {
+    generationSeed: input.generationSeed,
+    ...input.options,
+  };
+  const solution = await solveTimetable(problemSpec, solverOptions);
+
+  if (!solution.success) {
+    return solution;
+  }
+
+  const { version, context } = problemSpec;
+
+  // 3. Atomically persist generated sessions:
+  // Remove previously generated sessions for this specific academic context and draft version
+  await TimetableSession.deleteMany({
+    timetableVersionId: version._id,
+    academicContextId: context._id,
+  });
+
+  // Assign concrete version and context IDs to sessions
+  const sessionsToInsert = solution.sessions.map((s) => ({
+    ...s,
+    timetableVersionId: version._id,
+    academicContextId: context._id,
+  }));
+
+  const inserted = await TimetableSession.insertMany(sessionsToInsert);
+
+  // Update TimetableVersion metadata
+  version.status = 'GENERATED';
+  version.totalScheduledPeriods = inserted.length;
+  version.hardConflicts = 0;
+  version.generatedBy = user.name || user.email || 'Coordinator';
+  await version.save();
+
+  return {
+    success: true,
+    timetableVersion: version,
+    generationSeed: solution.generationSeed,
+    sessionsCreated: inserted.length,
+    assignments: inserted,
+    metrics: solution.metrics,
+    diagnostics: solution.diagnostics,
+  };
+}
+
+/**
  * Retrieves timetable sessions for a faculty member.
  * Strictly uses TimetableSession collection.
  */
@@ -88,6 +148,7 @@ async function getClassSchedule(academicContextId, versionId = null) {
 
 module.exports = {
   transitionTimetableStatus,
+  solveAndPersistTimetable,
   getFacultySchedule,
   getClassSchedule,
 };

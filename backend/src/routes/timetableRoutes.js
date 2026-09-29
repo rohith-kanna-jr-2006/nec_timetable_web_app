@@ -28,6 +28,20 @@ router.patch(
   timetableController.transitionVersion
 );
 
+// Automatic Timetable Generation (CSP Engine)
+router.post(
+  '/solve',
+  authenticateUser,
+  requireRole('HOD', 'AC', 'ADMIN'),
+  timetableController.solveTimetable
+);
+router.post(
+  '/generate',
+  authenticateUser,
+  requireRole('HOD', 'AC', 'ADMIN'),
+  timetableController.solveTimetable
+);
+
 // Session Scheduling
 router.post(
   '/session',

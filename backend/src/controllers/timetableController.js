@@ -6,9 +6,11 @@ const Faculty = require('../models/Faculty');
 const HODFacultyAllocation = require('../models/HODFacultyAllocation');
 const {
   transitionTimetableStatus,
+  solveAndPersistTimetable,
   getFacultySchedule,
   getClassSchedule,
 } = require('../services/timetableService');
+const { ConstraintBuilderError } = require('../services/timetable/constraintBuilder');
 const { successResponse, errorResponse } = require('../utils/responseHandler');
 
 /**
@@ -406,6 +408,58 @@ async function deleteSession(req, res, next) {
   }
 }
 
+/**
+ * Solve and generate timetable automatically using CSP engine
+ * POST /api/timetable/solve
+ */
+async function solveTimetable(req, res, next) {
+  try {
+    const { academicContextId, timetableVersionId, assignmentPlan, generationSeed, options } = req.body || {};
+
+    const result = await solveAndPersistTimetable(
+      {
+        academicContextId,
+        timetableVersionId,
+        assignmentPlan,
+        generationSeed,
+        options,
+      },
+      req.user || {}
+    );
+
+    if (!result.success) {
+      return errorResponse(res, result.message || 'Timetable generation failed.', 409, result.code || 'GENERATION_FAILED', {
+        metrics: result.metrics,
+        diagnostics: result.diagnostics,
+      });
+    }
+
+    return successResponse(res, result, 201);
+  } catch (error) {
+    if (error instanceof ConstraintBuilderError || error.name === 'ConstraintBuilderError') {
+      const codeToStatus = {
+        CONTEXT_NOT_FOUND: 404,
+        COURSE_NOT_FOUND: 404,
+        FACULTY_NOT_FOUND: 404,
+        VERSION_NOT_FOUND: 404,
+        INVALID_CONTEXT: 400,
+        CONTEXT_INACTIVE: 400,
+        INVALID_COHORT_YEAR: 400,
+        NO_COURSES_FOUND: 404,
+        HOD_ALLOCATION_REQUIRED: 409,
+        HOD_ALLOCATION_CONFLICT: 409,
+        HOD_FACULTY_MISMATCH: 409,
+        COURSE_SEMESTER_MISMATCH: 409,
+        VERSION_LOCKED: 409,
+        FACULTY_INACTIVE: 409,
+      };
+      const statusCode = codeToStatus[error.code] || 400;
+      return errorResponse(res, error.message, statusCode, error.code, error.details);
+    }
+    next(error);
+  }
+}
+
 module.exports = {
   getVersions,
   getVersionById,
@@ -416,4 +470,5 @@ module.exports = {
   getPublishedClassTimetable,
   createSession,
   deleteSession,
+  solveTimetable,
 };

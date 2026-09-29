@@ -540,6 +540,86 @@ State machine transition:
 `NO_TIMETABLE -> GENERATED -> PENDING_HOD_APPROVAL -> APPROVED -> PUBLISHED`
 - **Access**: Transition to `APPROVED` or `PUBLISHED` requires HOD or ADMIN.
 
+### `POST /api/timetable/solve`
+Automatic timetable solver invoking the Constraint Satisfaction & Optimization Problem (CSOP/CSP) engine.
+- **Access**: Coordinator (`AC`), `HOD`, `ADMIN`
+- **Aliases**: `POST /api/timetable/generate`
+- **Request Body**:
+  ```json
+  {
+    "academicContextId": "66f7...",
+    "timetableVersionId": "66f7...", // Optional: draft version ID; if omitted, automatically created
+    "assignmentPlan": [               // Optional: explicit assignment plan; if omitted, resolves semester core curriculum
+      {
+        "courseCode": "22CSC14",
+        "facultyId": "FWL-04",       // Optional: validated against authoritative HOD allocation
+        "requiredPeriods": 4,        // Optional: defaults to course curriculum requirement
+        "type": "THEORY"             // Optional: THEORY or LAB
+      }
+    ],
+    "generationSeed": 834291,        // Optional: integer seed for deterministic reproducible generation
+    "options": {
+      "maxNodes": 5000,              // Optional search limit
+      "maxBacktracks": 1200,         // Optional search limit
+      "timeoutMs": 10000             // Optional timeout
+    }
+  }
+  ```
+- **Success Response (`HTTP 201`)**:
+  ```json
+  {
+    "success": true,
+    "data": {
+      "timetableVersion": {
+        "_id": "...",
+        "status": "GENERATED",
+        "versionLabel": "v1.0 (Auto-Generated)",
+        "totalScheduledPeriods": 35
+      },
+      "generationSeed": 834291,
+      "sessionsCreated": 35,
+      "assignments": [
+        {
+          "timetableVersionId": "...",
+          "academicContextId": "...",
+          "courseCode": "22CSC14",
+          "courseName": "Principles of Compiler Design",
+          "facultyId": "FWL-04",
+          "facultyName": "Dr. A. Manchula",
+          "day": "MON",
+          "period": "P1",
+          "room": "LH-101",
+          "sessionType": "THEORY",
+          "duration": 1
+        }
+      ],
+      "metrics": {
+        "generationSeed": 834291,
+        "variablesCount": 35,
+        "nodesExplored": 42,
+        "backtracks": 0,
+        "forwardCheckFailures": 0,
+        "durationMs": 120
+      },
+      "diagnostics": {
+        "status": "SUCCESS",
+        "message": "Complete timetable generated satisfying all hard constraints and soft heuristics."
+      }
+    }
+  }
+  ```
+- **Error Codes**:
+  - `400 BAD_REQUEST / INVALID_CONTEXT`: Malformed request or inactive academic context.
+  - `401 UNAUTHORIZED`: Missing or invalid Bearer token.
+  - `403 FORBIDDEN`: Insufficient role permissions (e.g. `FACULTY`).
+  - `404 NOT_FOUND`: Academic context, course, or faculty not found.
+  - `409 HOD_ALLOCATION_REQUIRED`: A course lacks an approved HOD Course → Faculty allocation.
+  - `409 HOD_ALLOCATION_CONFLICT`: Multiple conflicting active HOD allocations exist for the course.
+  - `409 HOD_FACULTY_MISMATCH`: Requested faculty does not match authoritative HOD allocated faculty.
+  - `409 COURSE_SEMESTER_MISMATCH`: Course belongs to a different curriculum semester than the selected cohort.
+  - `409 UNSATISFIABLE_CONSTRAINTS`: No conflict-free timetable exists within the active constraints.
+  - `409 SEARCH_LIMIT_REACHED`: Search nodes or backtracks limit reached before finding complete solution.
+
 ### `POST /api/timetable/session`
 Create scheduled slot (`day`, `period`, `room`, `courseCode`, `facultyId`).
 - Checks for hard conflicts: returns 409 if faculty is already busy at that slot.
