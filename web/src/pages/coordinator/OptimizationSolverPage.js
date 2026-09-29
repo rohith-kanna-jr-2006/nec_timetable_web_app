@@ -1,11 +1,11 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useToast } from '../../context/ToastContext';
 import {
   createTimetableVersion,
   submitTimetableForApproval,
 } from '../../services/coordinatorService';
 
-import { getTimetableVersions, getClassTimetable, getFacultyTimetable } from '../../services/timetableService';
+import { getTimetableVersions, getClassTimetable, getFacultyTimetable, generateTimetable } from '../../services/timetableService';
 import { getAcademicContexts } from '../../services/academicContextService';
 import { getCourses } from '../../services/courseService';
 import { getFacultyList } from '../../services/facultyService';
@@ -37,10 +37,9 @@ export default function OptimizationSolverPage() {
   const [selectedYear, setSelectedYear] = useState('');
   const [selectedSemester, setSelectedSemester] = useState('');
   const [selectedContextId, setSelectedContextId] = useState('');
-  const [selectedCourseCode, setSelectedCourseCode] = useState('');
   
-  const [assignmentPlan, setAssignmentPlan] = useState([]);
-  const [generationStatus, setGenerationStatus] = useState('INITIAL'); // INITIAL, READY, GENERATING, GENERATED, CONFLICT, UNSCHEDULED, BLOCKED
+  const [generationStatus, setGenerationStatus] = useState('INITIAL'); // INITIAL, READY, GENERATING, GENERATED, ERROR
+  const [generationResult, setGenerationResult] = useState(null);
 
   const loadData = async () => {
     try {
@@ -122,16 +121,46 @@ export default function OptimizationSolverPage() {
   const targetCurriculumSemester = yearToCurriculumSemester[selectedYear] || selectedSemester;
   const validCourses = courses.filter(c => c.semester === targetCurriculumSemester);
 
-  // Auto-resolve selected course to initialize default
-  useEffect(() => {
-    if (validCourses.length > 0 && !validCourses.some(c => c.courseCode === selectedCourseCode)) {
-      setSelectedCourseCode(validCourses[0].courseCode);
-    }
-  }, [validCourses, selectedCourseCode]);
+  const selectedContext = contexts.find(c => c._id === selectedContextId);
+
+  // Auto-generate assignment plan derived from courses + context allocations
+  const assignmentPlan = useMemo(() => {
+    if (!selectedContextId || validCourses.length === 0) return [];
+    
+    return validCourses.map(course => {
+      const allocations = hodAllocations.filter(a => 
+        (a.academicContextId?._id || a.academicContextId) === selectedContextId && 
+        a.courseCode === course.courseCode
+      );
+      
+      const hasConflict = allocations.length > 1;
+      const matchingAlloc = allocations[0];
+      
+      let status = 'REQUIRES HOD DECISION';
+      if (hasConflict) status = 'CONFLICT';
+      else if (matchingAlloc) status = 'READY';
+
+      return {
+        id: course.courseCode,
+        contextId: selectedContextId,
+        contextDisplay: `${selectedContext?.year} - ${selectedContext?.section}`,
+        courseCode: course.courseCode,
+        courseTitle: course.courseName,
+        facultyId: matchingAlloc ? (matchingAlloc.facultyId?._id || matchingAlloc.facultyId) : null,
+        facultyName: matchingAlloc ? matchingAlloc.facultyName : null,
+        type: course.courseType || (course.isLab ? 'LAB' : 'THEORY'),
+        requiredPeriods: course.totalPeriod || (course.L || 0) + (course.T || 0) + (course.P || 0) || 4,
+        status,
+        hasConflict
+      };
+    });
+  }, [validCourses, hodAllocations, selectedContextId, selectedContext]);
 
   // Handle Cascades
   const handleYearChange = (year) => {
     setSelectedYear(year);
+    setGenerationStatus('INITIAL');
+    setGenerationResult(null);
     const sems = [...new Set(contexts.filter(c => c.year === year).map(c => c.semester))].filter(Boolean);
     if (sems.length > 0) {
       setSelectedSemester(sems[0]);
@@ -142,59 +171,47 @@ export default function OptimizationSolverPage() {
 
   const handleSemesterChange = (sem) => {
     setSelectedSemester(sem);
+    setGenerationStatus('INITIAL');
+    setGenerationResult(null);
     const secs = contexts.filter(c => c.year === selectedYear && c.semester === sem);
     if (secs.length > 0) setSelectedContextId(secs[0]._id);
   };
 
-  // Resolve Faculty for currently selected course
-  const selectedContext = contexts.find(c => c._id === selectedContextId);
-  const cohortAllocs = hodAllocations.filter(a => (a.academicContextId?._id || a.academicContextId) === selectedContextId);
-  const allocationsForCourse = cohortAllocs.filter(a => a.courseCode === selectedCourseCode);
-  const hasAllocationConflict = allocationsForCourse.length > 1;
-  const matchingAlloc = allocationsForCourse[0];
-  const selectedCourseObj = validCourses.find(c => c.courseCode === selectedCourseCode);
-
-  const handleAddToPlan = () => {
-    if (!selectedCourseObj) return;
-    
-    // Prevent exact duplicates
-    if (assignmentPlan.some(p => p.contextId === selectedContextId && p.courseCode === selectedCourseCode)) {
-      showToast('Course already exists in the Assignment Plan for this Class Section.', 'error');
-      return;
-    }
-
-    const newAssignment = {
-      id: Date.now().toString(),
-      contextId: selectedContextId,
-      contextDisplay: `${selectedContext?.year} - ${selectedContext?.section}`,
-      courseCode: selectedCourseCode,
-      courseTitle: selectedCourseObj.courseName,
-      facultyId: matchingAlloc ? (matchingAlloc.facultyId?._id || matchingAlloc.facultyId) : null,
-      facultyName: matchingAlloc ? matchingAlloc.facultyName : null,
-      type: selectedCourseObj.courseType || 'THEORY',
-      requiredPeriods: selectedCourseObj.totalPeriod || (selectedCourseObj.L || 0) + (selectedCourseObj.T || 0) + (selectedCourseObj.P || 0) || 4,
-      status: matchingAlloc ? 'READY' : 'REQUIRES HOD DECISION'
-    };
-
-    setAssignmentPlan([...assignmentPlan, newAssignment]);
-    setGenerationStatus('READY');
-    showToast('Course-Faculty assignment added.', 'success');
+  const handleContextChange = (id) => {
+    setSelectedContextId(id);
+    setGenerationStatus('INITIAL');
+    setGenerationResult(null);
   };
 
-  const handleRemoveFromPlan = (id) => {
-    const updatedPlan = assignmentPlan.filter(p => p.id !== id);
-    setAssignmentPlan(updatedPlan);
-    if (updatedPlan.length === 0) setGenerationStatus('INITIAL');
-  };
+  const isGenerateDisabled = assignmentPlan.length === 0 || 
+                             assignmentPlan.some(p => p.status !== 'READY') || 
+                             generationStatus === 'GENERATING';
 
-  const handleGenerateTimetable = () => {
+  const handleGenerateTimetable = async () => {
     setGenerationStatus('GENERATING');
+    setGenerationResult(null);
     
-    // Simulate API call check for backend block
-    setTimeout(() => {
-      setGenerationStatus('BLOCKED');
-      showToast('[BLOCKED BY BACKEND] Backend auto-generation API does not exist yet.', 'error');
-    }, 1200);
+    try {
+      const payload = {
+        academicContextId: selectedContextId,
+        assignmentPlan: assignmentPlan.map(p => ({
+          courseCode: p.courseCode,
+          facultyId: p.facultyId,
+          requiredPeriods: p.requiredPeriods,
+          type: p.type
+        }))
+      };
+      
+      const result = await generateTimetable(payload);
+      
+      setGenerationStatus('GENERATED');
+      setGenerationResult(result);
+      showToast('Timetable generation successful!', 'success');
+    } catch (err) {
+      console.error(err);
+      setGenerationStatus('ERROR');
+      showToast(`Generation failed: ${err.message || 'Unknown error'}`, 'error');
+    }
   };
 
   return (
@@ -221,7 +238,7 @@ export default function OptimizationSolverPage() {
       ) : (
         <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '24px', alignItems: 'start' }}>
           
-          <div style={{ display: 'grid', gridTemplateColumns: '350px 1fr', gap: '24px' }}>
+          <div className="responsive-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '24px' }}>
             {/* Assignment Builder Panel */}
             <Card style={{ padding: '20px' }}>
               <h3 style={{ margin: '0 0 20px 0', fontSize: '1.125rem', color: 'var(--color-primary)' }}>Prepare Assignment</h3>
@@ -258,7 +275,7 @@ export default function OptimizationSolverPage() {
                 <label style={{ display: 'block', fontSize: '0.8125rem', fontWeight: 600, marginBottom: '6px' }}>Class / Section</label>
                 <select
                   value={selectedContextId}
-                  onChange={(e) => setSelectedContextId(e.target.value)}
+                  onChange={(e) => handleContextChange(e.target.value)}
                   className="form-select"
                   style={{ width: '100%', padding: '8px 10px', borderRadius: 'var(--radius-md)', border: '1px solid var(--color-outline-variant)' }}
                 >
@@ -270,78 +287,65 @@ export default function OptimizationSolverPage() {
                 </select>
               </div>
 
-              <div style={{ marginBottom: '16px' }}>
-                <label style={{ display: 'block', fontSize: '0.8125rem', fontWeight: 600, marginBottom: '6px' }}>Course</label>
-                {!validCourses.length ? (
-                  <div style={{ padding: '8px 10px', borderRadius: 'var(--radius-md)', border: '1px solid var(--color-outline-variant)', color: 'var(--color-outline)' }}>
-                    No courses found.
-                  </div>
-                ) : (
-                  <select
-                    value={selectedCourseCode}
-                    onChange={(e) => setSelectedCourseCode(e.target.value)}
-                    className="form-select"
-                    style={{ width: '100%', padding: '8px 10px', borderRadius: 'var(--radius-md)', border: '1px solid var(--color-outline-variant)' }}
-                  >
-                    {validCourses.map((crs) => (
-                      <option key={crs.courseCode} value={crs.courseCode}>
-                        {crs.courseCode} – {crs.courseName}
-                      </option>
-                    ))}
-                  </select>
-                )}
-              </div>
-
-              <div style={{ marginBottom: '24px' }}>
-                <label style={{ display: 'block', fontSize: '0.8125rem', fontWeight: 600, marginBottom: '6px' }}>
-                  Faculty Instructor
-                </label>
+              {/* Curriculum Courses Area */}
+              <div style={{ marginTop: '24px', paddingTop: '24px', borderTop: '1px solid var(--color-border-subtle)' }}>
+                <h4 style={{ margin: '0 0 16px 0', fontSize: '1rem', color: 'var(--color-primary)' }}>
+                  Curriculum Courses
+                </h4>
                 
-                {hasAllocationConflict ? (
-                  <div style={{ padding: '8px 10px', backgroundColor: 'var(--color-error-container)', borderRadius: 'var(--radius-md)', border: '1px solid var(--color-error)' }}>
-                    <div style={{ fontWeight: 600, color: 'var(--color-error)', fontSize: '0.875rem', marginBottom: '4px' }}>
-                      [CONFLICT / MULTIPLE HOD ALLOCATIONS]
-                    </div>
-                    <div style={{ fontSize: '0.75rem', color: 'var(--color-on-error-container)' }}>
-                      Requires HOD resolution.
-                    </div>
-                  </div>
-                ) : matchingAlloc ? (
-                  <div style={{ padding: '8px 10px', backgroundColor: 'var(--color-surface-container-low)', borderRadius: 'var(--radius-md)', border: '1px solid var(--color-outline-variant)' }}>
-                    <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: '4px' }}>
-                      <div style={{ fontWeight: 600, color: 'var(--color-on-surface)', fontSize: '0.875rem' }}>
-                        {matchingAlloc.facultyId?._id || matchingAlloc.facultyId} – {matchingAlloc.facultyName}
-                      </div>
-                    </div>
-                    <Badge variant="success">HOD ALLOCATED</Badge>
-                    <div style={{ fontSize: '0.75rem', color: 'var(--color-outline)', marginTop: '6px' }}>
-                      Teaching Allocation: Verified from Master
-                    </div>
+                {validCourses.length === 0 ? (
+                  <div style={{ padding: '8px 10px', borderRadius: 'var(--radius-md)', border: '1px solid var(--color-outline-variant)', color: 'var(--color-outline)' }}>
+                    No curriculum courses found for this cohort.
                   </div>
                 ) : (
-                  <div style={{ padding: '8px 10px', backgroundColor: 'var(--color-warning-container)', borderRadius: 'var(--radius-md)', border: '1px solid var(--color-warning)' }}>
-                    <div style={{ fontWeight: 600, color: 'var(--color-warning-dark)', fontSize: '0.875rem', marginBottom: '4px' }}>
-                      ⚠️ No HOD allocation for this course
-                    </div>
-                    <div style={{ fontSize: '0.75rem', color: 'var(--color-on-warning-container)' }}>
-                      [REQUIRES HOD DECISION]
-                    </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', maxHeight: '450px', overflowY: 'auto', paddingRight: '8px' }}>
+                    {assignmentPlan.map(plan => (
+                      <div key={plan.courseCode} style={{ padding: '12px', backgroundColor: 'var(--color-surface-container-lowest)', borderRadius: 'var(--radius-md)', border: '1px solid var(--color-outline-variant)' }}>
+                        <div style={{ marginBottom: '8px' }}>
+                          <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, marginBottom: '4px', color: 'var(--color-on-surface-variant)' }}>Course</label>
+                          <div style={{ fontSize: '0.875rem', fontWeight: 500, color: 'var(--color-on-surface)' }}>
+                            {plan.courseCode} – {plan.courseTitle}
+                          </div>
+                        </div>
+                        
+                        <div>
+                          <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, marginBottom: '4px', color: 'var(--color-on-surface-variant)' }}>Faculty Instructor</label>
+                          {plan.status === 'READY' ? (
+                            <div style={{ padding: '6px 8px', backgroundColor: 'var(--color-surface-container-low)', borderRadius: 'var(--radius-sm)', border: '1px solid var(--color-outline-variant)' }}>
+                              <div style={{ fontSize: '0.875rem', fontWeight: 500, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                <span>{plan.facultyName}</span>
+                                <Badge variant="success">HOD ALLOCATED</Badge>
+                              </div>
+                            </div>
+                          ) : plan.status === 'CONFLICT' ? (
+                            <div style={{ padding: '6px 8px', backgroundColor: 'var(--color-error-container)', borderRadius: 'var(--radius-sm)', border: '1px solid var(--color-error)' }}>
+                              <div style={{ fontSize: '0.875rem', fontWeight: 500, color: 'var(--color-error)' }}>
+                                ⚠️ Conflicting HOD allocation
+                              </div>
+                              <div style={{ fontSize: '0.75rem', color: 'var(--color-on-error-container)', marginTop: '4px' }}>
+                                [HOD DECISION REQUIRED]
+                              </div>
+                            </div>
+                          ) : (
+                            <div style={{ padding: '6px 8px', backgroundColor: 'var(--color-warning-container)', borderRadius: 'var(--radius-sm)', border: '1px solid var(--color-warning)' }}>
+                              <div style={{ fontSize: '0.875rem', fontWeight: 500, color: 'var(--color-warning-dark)' }}>
+                                ⚠️ No HOD allocation for this course
+                              </div>
+                              <div style={{ fontSize: '0.75rem', color: 'var(--color-on-warning-container)', marginTop: '4px' }}>
+                                [REQUIRES HOD DECISION]
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    ))}
                   </div>
                 )}
               </div>
-
-              <Button
-                variant="primary"
-                style={{ width: '100%' }}
-                disabled={!selectedCourseObj || !matchingAlloc || hasAllocationConflict}
-                onClick={handleAddToPlan}
-              >
-                Add Course-Faculty Assignment
-              </Button>
             </Card>
 
             {/* Right Panel: Plan & Engine */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '24px', gridColumn: 'span 2' }}>
               <Card style={{ padding: '20px' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
                   <h3 style={{ margin: 0, fontSize: '1.125rem', color: 'var(--color-primary)' }}>Course–Faculty Assignment Plan</h3>
@@ -352,8 +356,7 @@ export default function OptimizationSolverPage() {
 
                 {assignmentPlan.length === 0 ? (
                   <div style={{ padding: '40px 0', textAlign: 'center', color: 'var(--color-outline)', border: '2px dashed var(--color-border-subtle)', borderRadius: 'var(--radius-lg)' }}>
-                    No assignments added yet.<br />
-                    Prepare assignments from the left panel.
+                    No assignments available for the selected cohort.
                   </div>
                 ) : (
                   <div className="ui-table-scroll-container">
@@ -366,7 +369,6 @@ export default function OptimizationSolverPage() {
                           <th style={{ padding: '12px 16px', fontWeight: 600 }}>Type</th>
                           <th style={{ padding: '12px 16px', fontWeight: 600, textAlign: 'center' }}>Required Periods</th>
                           <th style={{ padding: '12px 16px', fontWeight: 600 }}>Status</th>
-                          <th style={{ padding: '12px 16px', fontWeight: 600, textAlign: 'right' }}>Actions</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -374,14 +376,11 @@ export default function OptimizationSolverPage() {
                           <tr key={plan.id} style={{ borderBottom: '1px solid var(--color-surface-container)' }}>
                             <td style={{ padding: '12px 16px', fontWeight: 600, color: 'var(--color-primary)' }}>{plan.courseCode}</td>
                             <td style={{ padding: '12px 16px' }}>{plan.courseTitle}</td>
-                            <td style={{ padding: '12px 16px' }}>{plan.facultyId || 'Unassigned'}</td>
+                            <td style={{ padding: '12px 16px' }}>{plan.facultyName || 'Unassigned'}</td>
                             <td style={{ padding: '12px 16px' }}>{plan.type}</td>
                             <td style={{ padding: '12px 16px', textAlign: 'center' }}>{plan.requiredPeriods}</td>
                             <td style={{ padding: '12px 16px' }}>
-                              <Badge variant={plan.status === 'READY' ? 'success' : 'warning'}>{plan.status}</Badge>
-                            </td>
-                            <td style={{ padding: '12px 16px', textAlign: 'right' }}>
-                              <Button variant="danger" size="sm" onClick={() => handleRemoveFromPlan(plan.id)}>Remove</Button>
+                              <Badge variant={plan.status === 'READY' ? 'success' : plan.status === 'CONFLICT' ? 'error' : 'warning'}>{plan.status}</Badge>
                             </td>
                           </tr>
                         ))}
@@ -393,14 +392,14 @@ export default function OptimizationSolverPage() {
                 <div style={{ marginTop: '24px', paddingTop: '20px', borderTop: '1px solid var(--color-border-subtle)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                     <span style={{ fontWeight: 600, color: 'var(--color-on-surface-variant)' }}>Status:</span>
-                    <Badge variant={generationStatus === 'GENERATING' ? 'warning' : generationStatus === 'BLOCKED' ? 'error' : 'neutral'}>
-                      {generationStatus}
+                    <Badge variant={generationStatus === 'GENERATING' ? 'warning' : isGenerateDisabled ? 'error' : 'neutral'}>
+                      {generationStatus === 'GENERATING' ? 'GENERATING' : (isGenerateDisabled ? 'BLOCKED' : 'READY')}
                     </Badge>
                   </div>
                   <Button
                     variant="primary"
                     size="lg"
-                    disabled={assignmentPlan.length === 0 || generationStatus === 'GENERATING'}
+                    disabled={isGenerateDisabled}
                     onClick={handleGenerateTimetable}
                   >
                     {generationStatus === 'GENERATING' ? 'Generating Timetable...' : 'Generate Timetable'}
@@ -409,13 +408,19 @@ export default function OptimizationSolverPage() {
               </Card>
 
               {/* Generation Output Area */}
-              {(generationStatus === 'BLOCKED' || generationStatus === 'GENERATED') && (
-                <Card style={{ padding: '20px', borderLeft: generationStatus === 'BLOCKED' ? '4px solid var(--color-error)' : '4px solid var(--color-success)' }}>
-                  <h3 style={{ margin: '0 0 16px 0', fontSize: '1.125rem', color: generationStatus === 'BLOCKED' ? 'var(--color-error)' : 'var(--color-success)' }}>
-                    Generation Status: [BLOCKED BY BACKEND]
+              {(generationStatus === 'ERROR' || generationStatus === 'GENERATED') && (
+                <Card style={{ padding: '20px', borderLeft: generationStatus === 'ERROR' ? '4px solid var(--color-error)' : '4px solid var(--color-success)' }}>
+                  <h3 style={{ margin: '0 0 16px 0', fontSize: '1.125rem', color: generationStatus === 'ERROR' ? 'var(--color-error)' : 'var(--color-success)' }}>
+                    Generation Status: {generationStatus === 'ERROR' ? 'FAILED' : 'SUCCESSFUL'}
                   </h3>
                   
-                  {generationStatus === 'BLOCKED' ? (
+                  {generationStatus === 'ERROR' ? (
+                    <div>
+                      <p style={{ margin: 0, fontWeight: 600, color: 'var(--color-error)' }}>
+                        An error occurred while generating the timetable. Please check the backend logs.
+                      </p>
+                    </div>
+                  ) : (
                     <div>
                       <div style={{ marginBottom: '16px', fontSize: '0.875rem' }}>
                         <strong>Academic Context:</strong> {selectedYear} | Semester {selectedSemester}
@@ -425,18 +430,15 @@ export default function OptimizationSolverPage() {
                         <div><strong>Course Assignments:</strong> {assignmentPlan.length}</div>
                         <div><strong>Theory Courses:</strong> {assignmentPlan.filter(p => p.type === 'THEORY').length}</div>
                         <div><strong>Lab Courses:</strong> {assignmentPlan.filter(p => p.type === 'LAB').length}</div>
-                        <div><strong>Generated Sessions:</strong> 0</div>
-                        <div><strong>Unscheduled Courses:</strong> {assignmentPlan.length}</div>
+                        <div><strong>Generated Sessions:</strong> {generationResult?.sessionsCount || generationResult?.data?.sessionsCount || 0}</div>
+                        <div><strong>Seed:</strong> {generationResult?.seed || generationResult?.data?.seed || 'N/A'}</div>
                       </div>
 
                       <p style={{ margin: '0 0 12px 0', lineHeight: 1.5, color: 'var(--color-on-surface-variant)', fontSize: '0.875rem' }}>
-                        The automated timetable generation engine requires the <code>POST /api/timetable/solve</code> backend endpoint to apply strict constraints (faculty cross-class conflicts, theory distribution, lab continuous blocks).
-                      </p>
-                      <p style={{ margin: 0, fontWeight: 600, color: 'var(--color-error)' }}>
-                        Do not fabricate a frontend timetable. Waiting on Backend implementation.
+                        The timetable generation engine has successfully processed the assignments and applied all strict constraints (faculty cross-class conflicts, theory distribution, lab continuous blocks).
                       </p>
                     </div>
-                  ) : null}
+                  )}
                 </Card>
               )}
             </div>
