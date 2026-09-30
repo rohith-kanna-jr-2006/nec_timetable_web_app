@@ -8,6 +8,7 @@ const { R22_ELECTIVE_SLOT_MAP } = require('../data/r22CurriculumMaster');
 const { successResponse, errorResponse } = require('../utils/responseHandler');
 const {
   ALLOCATION_RULES,
+  normalizeDepartment,
   getCourseAllocationPolicy,
   computeAllocationStatus,
   validateAllocationPayload,
@@ -151,17 +152,45 @@ async function getAllocationContext(req, res, next) {
           source = 'THEORY_LINKED';
         }
 
+        let slotEligibleFaculty = null;
+        if (slot.eligibleDepartment) {
+          const normSlotDept = normalizeDepartment(slot.eligibleDepartment);
+          slotEligibleFaculty = allFaculty
+            .filter((f) => normalizeDepartment(f.department) === normSlotDept)
+            .map((f) => ({
+              facultyId: f.facultyId,
+              facultyName: f.facultyName,
+              designation: f.designation,
+              department: f.department,
+            }));
+        }
+
         return {
           role: slot.role,
           required: slot.required,
           source,
           description: slot.description,
+          eligibleDepartment: slot.eligibleDepartment || null,
+          eligibleFaculty: slotEligibleFaculty,
           faculty: assignedFacultyDoc,
         };
       });
 
+
       const currentFacultyAssignments = existingAlloc?.facultyAssignments || [];
       const allocationStatus = computeAllocationStatus(policy, existingAlloc, linkedTheoryAllocation);
+
+      let eligibleFacultyList = allFaculty;
+      if (policy.rule === ALLOCATION_RULES.MC_DEPARTMENT) {
+        const targetDept = normalizeDepartment(context.department);
+        eligibleFacultyList = allFaculty.filter((f) => normalizeDepartment(f.department) === targetDept);
+      }
+      const eligibleFaculty = eligibleFacultyList.map((f) => ({
+        facultyId: f.facultyId,
+        facultyName: f.facultyName,
+        designation: f.designation,
+        department: f.department,
+      }));
 
       return {
         courseCode: crs.courseCode,
@@ -178,6 +207,7 @@ async function getAllocationContext(req, res, next) {
         currentFacultyAssignments,
         allocationStatus,
         timetableMapping: existingAlloc?.timetableMapping || policy.timetableMapping,
+        eligibleFaculty,
       };
     });
 

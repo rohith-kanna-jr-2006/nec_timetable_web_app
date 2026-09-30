@@ -122,6 +122,16 @@ const courseSchema = new mongoose.Schema(
       default: false,
       index: true,
     },
+    allocationPolicy: {
+      type: {
+        type: String,
+        default: null,
+      },
+      linkedTheoryCourseCode: {
+        type: String,
+        default: null,
+      },
+    },
     isActive: {
       type: Boolean,
       default: true,

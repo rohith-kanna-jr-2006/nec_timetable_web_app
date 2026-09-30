@@ -373,7 +373,10 @@ async function runCoordinatorTimetableFlowTests() {
     // ------------------------------------------------------------
     console.log('\n--- TEST 11: Faculty Slot Conflict Across Cohorts Rejected ---');
     // FWL-04 is teaching SAT P1 in III-A. Attempt to schedule FWL-04 in II-A on SAT P1
-    // First, add allocation for 22CSC05 in II-A to FWL-04 temporarily to test slot conflict
+    // First, temporarily ensure exactly 1 allocation for 22CSC05 in II-A to FWL-04 to test slot conflict
+    const existingIIAllocs = await HODFacultyAllocation.find({ academicContextId: ctxII_A._id, courseCode: '22CSC05' }).lean();
+    await HODFacultyAllocation.deleteMany({ academicContextId: ctxII_A._id, courseCode: '22CSC05' });
+
     const iiAlloc = await HODFacultyAllocation.create({
       academicContextId: ctxII_A._id,
       courseCode: '22CSC05',
@@ -402,6 +405,12 @@ async function runCoordinatorTimetableFlowTests() {
     assert(facConflictRes.body.code === 'FACULTY_TIME_CONFLICT', 'Error code is FACULTY_TIME_CONFLICT');
 
     await HODFacultyAllocation.findByIdAndDelete(iiAlloc._id);
+    if (existingIIAllocs.length > 0) {
+      for (const oldA of existingIIAllocs) {
+        delete oldA._id;
+        await HODFacultyAllocation.create(oldA);
+      }
+    }
 
     // ------------------------------------------------------------
     // TEST 12: Exact duplicate session -> rejected

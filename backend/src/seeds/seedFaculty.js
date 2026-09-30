@@ -1,12 +1,12 @@
 const Faculty = require('../models/Faculty');
-const path = require('path');
+const { MATHEMATICS_FACULTY_MASTER, ENGLISH_FACULTY_MASTER } = require('../data/shFacultyMasterData');
 
 async function seedFaculty() {
-  console.log('[Seed] Importing faculty from constants/workloadMasterData.js...');
+  console.log('[Seed] Importing faculty from data/workloadMasterData.js and data/shFacultyMasterData.js...');
   const workloadModule = await import('../data/workloadMasterData.js');
   const masterData = workloadModule.FACULTY_WORKLOAD_MASTER;
 
-  const facultyDocs = masterData.map((f) => {
+  const cseEceDocs = masterData.map((f) => {
     // Determine roles from designation and responsibilities
     const roles = [];
     const desigLower = (f.designation || '').toLowerCase();
@@ -32,7 +32,7 @@ async function seedFaculty() {
 
     return {
       facultyId: f.facultyId,
-      facultyName: f.facultyName, // Exact spelling preserved (e.g. Dr. S. Karpusamy)
+      facultyName: f.facultyName,
       designation: f.designation,
       department,
       email,
@@ -42,13 +42,28 @@ async function seedFaculty() {
     };
   });
 
-  await Faculty.deleteMany({});
-  const inserted = await Faculty.insertMany(facultyDocs);
-  console.log(`[Seed] Successfully seeded ${inserted.length} faculty members (25 CSE, 2 ECE).`);
-  if (inserted.length !== 27) {
-    throw new Error(`Expected exactly 27 faculty records, but seeded: ${inserted.length}`);
-  }
-  return inserted;
+  const allFacultyDocs = [
+    ...cseEceDocs,
+    ...MATHEMATICS_FACULTY_MASTER,
+    ...ENGLISH_FACULTY_MASTER,
+  ];
+
+  // Non-destructive, idempotent upsert
+  const bulkOps = allFacultyDocs.map((doc) => ({
+    updateOne: {
+      filter: { facultyId: doc.facultyId },
+      update: { $set: doc },
+      upsert: true,
+    },
+  }));
+
+  await Faculty.bulkWrite(bulkOps);
+  console.log(
+    `[Seed] Successfully seeded ${allFacultyDocs.length} faculty members (25 CSE, 2 ECE, 16 Mathematics, 9 English).`
+  );
+
+  return allFacultyDocs;
 }
 
 module.exports = { seedFaculty };
+

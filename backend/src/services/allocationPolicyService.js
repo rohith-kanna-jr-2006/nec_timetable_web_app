@@ -43,6 +43,37 @@ const THEORY_LAB_LINKS = {
   '22CSP12': '22CSC18',
 };
 
+// Authoritative canonical allocation policies defined by curriculum master
+const CANONICAL_ALLOCATION_POLICIES = {
+  // Semester I
+  '22MAN01': { type: ALLOCATION_RULES.MC_OPTIONAL_MAPPING, linkedTheoryCourseCode: null },
+  '22CSP01': { type: ALLOCATION_RULES.LAB_2_TO_3, linkedTheoryCourseCode: '22CSC01' },
+  '22ECP01': { type: ALLOCATION_RULES.LAB_2_TO_3, linkedTheoryCourseCode: '22ECC01' },
+  '22PYP01': { type: ALLOCATION_RULES.LAB_2_TO_3, linkedTheoryCourseCode: '22PYB01' },
+  // Semester II
+  '22MAN02R': { type: ALLOCATION_RULES.MC_SAS, linkedTheoryCourseCode: null },
+  '22CSP02': { type: ALLOCATION_RULES.LAB_2_TO_3, linkedTheoryCourseCode: '22CSC02' },
+  '22CSP03': { type: ALLOCATION_RULES.LAB_2_TO_3, linkedTheoryCourseCode: '22CSC03' },
+  '22MEP01': { type: ALLOCATION_RULES.LAB_2_TO_3, linkedTheoryCourseCode: null },
+  // Semester III
+  '22CSP04': { type: ALLOCATION_RULES.LAB_2_TO_3, linkedTheoryCourseCode: '22CSC05' },
+  '22CSP05': { type: ALLOCATION_RULES.LAB_2_TO_3, linkedTheoryCourseCode: '22CSC06' },
+  '22CSP06': { type: ALLOCATION_RULES.LAB_2_TO_3, linkedTheoryCourseCode: '22CSC07' },
+  '22MAN04R': { type: ALLOCATION_RULES.MC_SAS, linkedTheoryCourseCode: null },
+  '22MAN09': { type: ALLOCATION_RULES.MC_DEPARTMENT, linkedTheoryCourseCode: null },
+  // Semester IV
+  '22CSP07': { type: ALLOCATION_RULES.LAB_2_TO_3, linkedTheoryCourseCode: '22CSC11' },
+  '22CSP08': { type: ALLOCATION_RULES.LAB_2_TO_3, linkedTheoryCourseCode: '22CSC12' },
+  '22MAN07R': { type: ALLOCATION_RULES.MC_SAS, linkedTheoryCourseCode: null },
+  // Semester V
+  '22CSP09': { type: ALLOCATION_RULES.LAB_2_TO_3, linkedTheoryCourseCode: '22CSC15' },
+  '22CSP10': { type: ALLOCATION_RULES.LAB_2_TO_3, linkedTheoryCourseCode: '22CSC16' },
+  '22MAN8R': { type: ALLOCATION_RULES.MC_SAS, linkedTheoryCourseCode: null },
+  // Semester VI
+  '22CSP11': { type: ALLOCATION_RULES.LAB_2_TO_3, linkedTheoryCourseCode: '22CSC17' },
+  '22CSP12': { type: ALLOCATION_RULES.LAB_2_TO_3, linkedTheoryCourseCode: '22CSC18' },
+};
+
 /**
  * Normalizes institutional department representations.
  */
@@ -56,6 +87,8 @@ function normalizeDepartment(dept) {
   if (s.includes('ELECTRICAL') || s.includes('EEE')) return 'EEE';
   if (s.includes('INFORMATION') || s.includes('IT')) return 'IT';
   if (s.includes('SCIENCE & HUMANITIES') || s.includes('H&S')) return 'H&S';
+  if (s.includes('MATH') || s.includes('MATHEMATICS')) return 'MATHEMATICS';
+  if (s.includes('ENGLISH')) return 'ENGLISH';
   return s.trim();
 }
 
@@ -66,35 +99,25 @@ function getLinkedTheoryCourseCode(course, allCourses = []) {
   if (!course) return null;
   const code = (course.courseCode || '').toUpperCase().trim();
 
-  // 1. Explicit link in curriculum mapping
+  // 1. Direct property on course model / canonical configuration
+  if (course.allocationPolicy && course.allocationPolicy.linkedTheoryCourseCode) {
+    return course.allocationPolicy.linkedTheoryCourseCode;
+  }
+  if (CANONICAL_ALLOCATION_POLICIES[code] && CANONICAL_ALLOCATION_POLICIES[code].linkedTheoryCourseCode) {
+    return CANONICAL_ALLOCATION_POLICIES[code].linkedTheoryCourseCode;
+  }
   if (THEORY_LAB_LINKS[code]) {
     return THEORY_LAB_LINKS[code];
   }
-
-  // 2. Direct property if defined on model
   if (course.linkedTheoryCourseCode) {
     return course.linkedTheoryCourseCode;
-  }
-
-  // 3. Dynamic title match fallback (e.g. "Full Stack Development Laboratory" -> "Full Stack Development")
-  if (Array.isArray(allCourses) && allCourses.length > 0 && course.courseName) {
-    const labBaseName = course.courseName.replace(/\s+Laboratory$/i, '').replace(/\s+Lab$/i, '').trim().toLowerCase();
-    const matchedTheory = allCourses.find((c) => {
-      if (c.courseCode === code) return false;
-      if (c.isLab || c.courseType === 'LAB') return false;
-      const tName = (c.courseName || '').trim().toLowerCase();
-      return tName === labBaseName;
-    });
-    if (matchedTheory) {
-      return matchedTheory.courseCode;
-    }
   }
 
   return null;
 }
 
 /**
- * Derives the authoritative allocation policy for a course.
+ * Derives the authoritative allocation policy for a course using canonical metadata.
  */
 function getCourseAllocationPolicy(course, allCourses = []) {
   if (!course) {
@@ -109,6 +132,7 @@ function getCourseAllocationPolicy(course, allCourses = []) {
     };
   }
 
+  const code = (course.courseCode || '').toUpperCase().trim();
   const isLab =
     course.isLab === true ||
     course.courseType === 'LAB' ||
@@ -116,10 +140,15 @@ function getCourseAllocationPolicy(course, allCourses = []) {
 
   const category = (course.category || '').toUpperCase().trim();
   const courseType = (course.courseType || '').toUpperCase().trim();
-  const courseName = (course.courseName || '').toLowerCase();
 
-  // 1. LABORATORY Policy: LAB_2_TO_3
-  if (isLab) {
+  // 1. Authoritative canonical policy lookup
+  const canonical =
+    (course.allocationPolicy && course.allocationPolicy.type)
+      ? { type: course.allocationPolicy.type, linkedTheoryCourseCode: course.allocationPolicy.linkedTheoryCourseCode }
+      : (CANONICAL_ALLOCATION_POLICIES[code] || null);
+
+  // 2. LABORATORY Policy: LAB_2_TO_3
+  if ((canonical && canonical.type === ALLOCATION_RULES.LAB_2_TO_3) || isLab) {
     const linkedTheory = getLinkedTheoryCourseCode(course, allCourses);
     return {
       rule: ALLOCATION_RULES.LAB_2_TO_3,
@@ -154,78 +183,59 @@ function getCourseAllocationPolicy(course, allCourses = []) {
     };
   }
 
-  // 2. MANDATORY COURSES (MC)
-  if (category === 'MC' || courseType === 'MC') {
-    // 2a. Induction Programme: MC_OPTIONAL_MAPPING
-    if (courseName.includes('induction') || (course.credits === 0 && course.contactHours === 0 && course.totalPeriod === 0)) {
-      return {
-        rule: ALLOCATION_RULES.MC_OPTIONAL_MAPPING,
-        minFaculty: 0,
-        maxFaculty: 1,
-        facultyRequired: false,
-        linkedTheoryCourseCode: null,
-        constraints: { minFaculty: 0, maxFaculty: 1 },
-        slots: [
-          {
-            role: 'PRIMARY',
-            required: false,
-            source: 'MANUAL',
-            description: 'Optional coordinator / faculty member',
-          },
-        ],
-        timetableMapping: { allowed: true, required: false, enabled: false },
-      };
-    }
+  // 3. MANDATORY COURSES (MC) & SAS
+  if ((canonical && canonical.type === ALLOCATION_RULES.MC_OPTIONAL_MAPPING) ||
+      (category === 'MC' && course.totalPeriod === 0 && course.contactHours === 0 && course.credits === 0)) {
+    return {
+      rule: ALLOCATION_RULES.MC_OPTIONAL_MAPPING,
+      minFaculty: 0,
+      maxFaculty: 1,
+      facultyRequired: false,
+      linkedTheoryCourseCode: null,
+      constraints: { minFaculty: 0, maxFaculty: 1 },
+      slots: [
+        {
+          role: 'PRIMARY',
+          required: false,
+          source: 'MANUAL',
+          description: 'Optional coordinator / faculty member',
+        },
+      ],
+      timetableMapping: { allowed: true, required: false, enabled: false },
+    };
+  }
 
-    // 2b. Indian Constitution: MC_DEPARTMENT
-    if (courseName.includes('constitution')) {
-      return {
-        rule: ALLOCATION_RULES.MC_DEPARTMENT,
-        minFaculty: 1,
-        maxFaculty: 1,
-        facultyRequired: true,
-        linkedTheoryCourseCode: null,
-        constraints: { minFaculty: 1, maxFaculty: 1 },
-        slots: [
-          {
-            role: 'PRIMARY',
-            required: true,
-            source: 'MANUAL',
-            description: 'Department faculty member',
-          },
-        ],
-        timetableMapping: { allowed: true, required: true, enabled: true },
-      };
-    }
+  if ((canonical && canonical.type === ALLOCATION_RULES.MC_SAS) ||
+      courseType === 'SAS' ||
+      (category === 'MC' && course.P > 0 && course.L > 0)) {
+    return {
+      rule: ALLOCATION_RULES.MC_SAS,
+      minFaculty: 2,
+      maxFaculty: 2,
+      facultyRequired: true,
+      linkedTheoryCourseCode: null,
+      constraints: { minFaculty: 2, maxFaculty: 2 },
+      slots: [
+        {
+          role: 'MATHS_BME',
+          required: true,
+          source: 'MANUAL',
+          eligibleDepartment: 'MATHEMATICS',
+          description: 'Mathematics / Quantitative / BME instructor',
+        },
+        {
+          role: 'ENGLISH',
+          required: true,
+          source: 'MANUAL',
+          eligibleDepartment: 'ENGLISH',
+          description: 'Verbal / English instructor',
+        },
+      ],
+      timetableMapping: { allowed: true, required: true, enabled: true },
+    };
+  }
 
-    // 2c. Soft/Analytical Skills (SAS): MC_SAS
-    if (courseName.includes('soft') || courseName.includes('analytical') || courseType === 'SAS') {
-      return {
-        rule: ALLOCATION_RULES.MC_SAS,
-        minFaculty: 2,
-        maxFaculty: 2,
-        facultyRequired: true,
-        linkedTheoryCourseCode: null,
-        constraints: { minFaculty: 2, maxFaculty: 2 },
-        slots: [
-          {
-            role: 'MATHS_BME',
-            required: true,
-            source: 'MANUAL',
-            description: 'Mathematics / Quantitative / BME instructor',
-          },
-          {
-            role: 'ENGLISH',
-            required: true,
-            source: 'MANUAL',
-            description: 'Verbal / English instructor',
-          },
-        ],
-        timetableMapping: { allowed: true, required: true, enabled: true },
-      };
-    }
-
-    // 2d. Other general MC
+  if ((canonical && canonical.type === ALLOCATION_RULES.MC_DEPARTMENT) || category === 'MC' || courseType === 'MC') {
     return {
       rule: ALLOCATION_RULES.MC_DEPARTMENT,
       minFaculty: 1,
@@ -245,7 +255,7 @@ function getCourseAllocationPolicy(course, allCourses = []) {
     };
   }
 
-  // 3. STANDARD THEORY: THEORY_SINGLE
+  // 4. STANDARD THEORY: THEORY_SINGLE
   return {
     rule: ALLOCATION_RULES.THEORY_SINGLE,
     minFaculty: 1,
@@ -379,11 +389,58 @@ async function validateAllocationPayload({ academicContext, course, payload, exi
     ];
   }
 
-  // 2. Minimum faculty & role requirements
+  // 2. Strict role check for SAS
   if (policy.rule === ALLOCATION_RULES.MC_SAS) {
-    const hasMaths = inputAssignments.some((a) => a.role === 'MATHS_BME');
-    const hasEnglish = inputAssignments.some((a) => a.role === 'ENGLISH');
-    if (!hasMaths) {
+    const allowedSasRoles = ['MATHS_BME', 'ENGLISH'];
+    for (const fa of inputAssignments) {
+      if (!fa.role || !allowedSasRoles.includes(fa.role)) {
+        return {
+          isValid: false,
+          error: {
+            code: 'SAS_INVALID_ROLE',
+            message: `Unknown or disallowed role '${fa.role}' for SAS allocation. Allowed roles are: MATHS_BME, ENGLISH.`,
+            details: { courseCode, role: fa.role },
+          },
+        };
+      }
+    }
+
+    if (inputAssignments.length > 2) {
+      return {
+        isValid: false,
+        error: {
+          code: 'SAS_INVALID_ROLE',
+          message: `Soft/Analytical Skills allocation requires exactly two instructors (MATHS_BME and ENGLISH). Received: ${inputAssignments.length}.`,
+          details: { courseCode, count: inputAssignments.length },
+        },
+      };
+    }
+
+    const mathsSlots = inputAssignments.filter((a) => a.role === 'MATHS_BME');
+    const englishSlots = inputAssignments.filter((a) => a.role === 'ENGLISH');
+
+    if (mathsSlots.length > 1) {
+      return {
+        isValid: false,
+        error: {
+          code: 'SAS_DUPLICATE_ROLE',
+          message: 'SAS allocation can have only one MATHS_BME instructor.',
+          details: { courseCode, count: mathsSlots.length },
+        },
+      };
+    }
+    if (englishSlots.length > 1) {
+      return {
+        isValid: false,
+        error: {
+          code: 'SAS_DUPLICATE_ROLE',
+          message: 'SAS allocation can have only one ENGLISH instructor.',
+          details: { courseCode, count: englishSlots.length },
+        },
+      };
+    }
+
+    if (mathsSlots.length === 0) {
       return {
         isValid: false,
         error: {
@@ -393,13 +450,86 @@ async function validateAllocationPayload({ academicContext, course, payload, exi
         },
       };
     }
-    if (!hasEnglish) {
+    if (englishSlots.length === 0) {
       return {
         isValid: false,
         error: {
           code: 'SAS_ENGLISH_REQUIRED',
           message: `Soft/Analytical Skills course '${courseCode}' requires a designated ENGLISH instructor.`,
           details: { courseCode },
+        },
+      };
+    }
+  }
+
+  // Strict role check for LAB (invalid and duplicate roles check)
+  if (policy.rule === ALLOCATION_RULES.LAB_2_TO_3) {
+    const allowedLabRoles = ['PRIMARY', 'ADDITIONAL', 'OPTIONAL'];
+    for (const fa of inputAssignments) {
+      if (!fa.role || !allowedLabRoles.includes(fa.role)) {
+        return {
+          isValid: false,
+          error: {
+            code: 'LAB_INVALID_ROLE',
+            message: `Unknown or disallowed role '${fa.role}' for LAB allocation. Allowed roles are: PRIMARY, ADDITIONAL, OPTIONAL.`,
+            details: { courseCode, role: fa.role },
+          },
+        };
+      }
+    }
+    if (inputAssignments.length < policy.minFaculty) {
+      return {
+        isValid: false,
+        error: {
+          code: 'LAB_MINIMUM_FACULTY_NOT_MET',
+          message: `LAB allocation requires at least ${policy.minFaculty} faculty members (PRIMARY and ADDITIONAL).`,
+          details: { courseCode, required: policy.minFaculty, received: inputAssignments.length },
+        },
+      };
+    }
+
+    if (inputAssignments.length > policy.maxFaculty) {
+      return {
+        isValid: false,
+        error: {
+          code: 'LAB_MAXIMUM_FACULTY_EXCEEDED',
+          message: `LAB allocation cannot exceed ${policy.maxFaculty} faculty members.`,
+          details: { courseCode, maxAllowed: policy.maxFaculty, received: inputAssignments.length },
+        },
+      };
+    }
+
+    const primarySlots = inputAssignments.filter((a) => a.role === 'PRIMARY');
+    const additionalSlots = inputAssignments.filter((a) => a.role === 'ADDITIONAL');
+    const optionalSlots = inputAssignments.filter((a) => a.role === 'OPTIONAL');
+
+    if (primarySlots.length > 1) {
+      return {
+        isValid: false,
+        error: {
+          code: 'LAB_DUPLICATE_ROLE',
+          message: 'LAB allocation can have only one PRIMARY faculty.',
+          details: { courseCode, count: primarySlots.length },
+        },
+      };
+    }
+    if (additionalSlots.length > 1) {
+      return {
+        isValid: false,
+        error: {
+          code: 'LAB_DUPLICATE_ROLE',
+          message: 'LAB allocation can have only one ADDITIONAL faculty.',
+          details: { courseCode, count: additionalSlots.length },
+        },
+      };
+    }
+    if (optionalSlots.length > 1) {
+      return {
+        isValid: false,
+        error: {
+          code: 'LAB_DUPLICATE_ROLE',
+          message: 'LAB allocation can have at most one OPTIONAL faculty.',
+          details: { courseCode, count: optionalSlots.length },
         },
       };
     }
@@ -496,15 +626,19 @@ async function validateAllocationPayload({ academicContext, course, payload, exi
     facultyIdsSeen.add(fid);
   }
 
-  // 5. Verify every assigned faculty exists and is active
+  // 5. Verify every assigned faculty exists and is active (Batched single query)
   const enrichedAssignments = [];
-  const facultyDocsMap = new Map();
+  const uniqueFacultyIds = [...new Set(inputAssignments.map((a) => (a.facultyId || '').trim()).filter(Boolean))];
+  const foundFacultyDocs = await Faculty.find({ facultyId: { $in: uniqueFacultyIds } });
+  const facultyDocsMap = new Map(foundFacultyDocs.map((f) => [f.facultyId, f]));
 
   for (const fa of inputAssignments) {
     const fid = (fa.facultyId || '').trim();
-    const facDoc = await Faculty.findOne({ facultyId: fid });
+    const facDoc = facultyDocsMap.get(fid);
     if (!facDoc) {
-      const code = policy.rule === ALLOCATION_RULES.LAB_2_TO_3 ? 'LAB_FACULTY_NOT_FOUND' : 'FACULTY_NOT_FOUND';
+      const code = policy.rule === ALLOCATION_RULES.LAB_2_TO_3
+        ? 'LAB_FACULTY_NOT_FOUND'
+        : (policy.rule === ALLOCATION_RULES.MC_SAS ? 'SAS_FACULTY_NOT_FOUND' : 'FACULTY_NOT_FOUND');
       return {
         isValid: false,
         error: {
@@ -515,7 +649,9 @@ async function validateAllocationPayload({ academicContext, course, payload, exi
       };
     }
     if (facDoc.isActive === false) {
-      const code = policy.rule === ALLOCATION_RULES.LAB_2_TO_3 ? 'LAB_FACULTY_INACTIVE' : 'FACULTY_INACTIVE';
+      const code = policy.rule === ALLOCATION_RULES.LAB_2_TO_3
+        ? 'LAB_FACULTY_INACTIVE'
+        : (policy.rule === ALLOCATION_RULES.MC_SAS ? 'SAS_FACULTY_INACTIVE' : 'FACULTY_INACTIVE');
       return {
         isValid: false,
         error: {
@@ -525,17 +661,31 @@ async function validateAllocationPayload({ academicContext, course, payload, exi
         },
       };
     }
-    facultyDocsMap.set(fid, facDoc);
   }
 
   // 6. POLICY-SPECIFIC ROLE & ELIGIBILITY ENFORCEMENT
 
   // 6a. LAB_2_TO_3 Role Validation
   if (policy.rule === ALLOCATION_RULES.LAB_2_TO_3) {
-    const primarySlot = inputAssignments.find((a) => a.role === 'PRIMARY');
-    const additionalSlot = inputAssignments.find((a) => a.role === 'ADDITIONAL');
+    const allowedLabRoles = ['PRIMARY', 'ADDITIONAL', 'OPTIONAL'];
+    for (const fa of inputAssignments) {
+      if (!fa.role || !allowedLabRoles.includes(fa.role)) {
+        return {
+          isValid: false,
+          error: {
+            code: 'LAB_INVALID_ROLE',
+            message: `Unknown or disallowed role '${fa.role}' for LAB allocation. Allowed roles are: PRIMARY, ADDITIONAL, OPTIONAL.`,
+            details: { courseCode, role: fa.role },
+          },
+        };
+      }
+    }
 
-    if (!primarySlot) {
+    const primarySlots = inputAssignments.filter((a) => a.role === 'PRIMARY');
+    const additionalSlots = inputAssignments.filter((a) => a.role === 'ADDITIONAL');
+    const optionalSlots = inputAssignments.filter((a) => a.role === 'OPTIONAL');
+
+    if (primarySlots.length === 0) {
       return {
         isValid: false,
         error: {
@@ -546,7 +696,18 @@ async function validateAllocationPayload({ academicContext, course, payload, exi
       };
     }
 
-    if (!additionalSlot) {
+    if (primarySlots.length > 1) {
+      return {
+        isValid: false,
+        error: {
+          code: 'LAB_DUPLICATE_ROLE',
+          message: 'LAB allocation can have only one PRIMARY faculty.',
+          details: { courseCode, count: primarySlots.length },
+        },
+      };
+    }
+
+    if (additionalSlots.length === 0) {
       return {
         isValid: false,
         error: {
@@ -557,39 +718,89 @@ async function validateAllocationPayload({ academicContext, course, payload, exi
       };
     }
 
+    if (additionalSlots.length > 1) {
+      return {
+        isValid: false,
+        error: {
+          code: 'LAB_DUPLICATE_ROLE',
+          message: 'LAB allocation can have only one ADDITIONAL faculty.',
+          details: { courseCode, count: additionalSlots.length },
+        },
+      };
+    }
+
+    if (optionalSlots.length > 1) {
+      return {
+        isValid: false,
+        error: {
+          code: 'LAB_DUPLICATE_ROLE',
+          message: 'LAB allocation can have at most one OPTIONAL faculty.',
+          details: { courseCode, count: optionalSlots.length },
+        },
+      };
+    }
+
+    const primarySlot = primarySlots[0];
+
     // Theory-linked Primary validation
     if (policy.linkedTheoryCourseCode) {
       const theoryAlloc = existingAllocations.find(
         (a) => a.courseCode === policy.linkedTheoryCourseCode && a.status !== 'REJECTED'
       );
 
-      if (theoryAlloc && theoryAlloc.facultyId) {
-        const expectedTheoryFacultyId = theoryAlloc.facultyId.trim();
-        if (primarySlot.facultyId.trim() !== expectedTheoryFacultyId) {
-          return {
-            isValid: false,
-            error: {
-              code: 'LAB_PRIMARY_THEORY_MISMATCH',
-              message: `LAB primary faculty '${primarySlot.facultyId}' must match the linked Theory course (${policy.linkedTheoryCourseCode}) assigned faculty '${expectedTheoryFacultyId}'.`,
-              details: {
-                courseCode,
-                linkedTheoryCourseCode: policy.linkedTheoryCourseCode,
-                expectedFacultyId: expectedTheoryFacultyId,
-                submittedFacultyId: primarySlot.facultyId,
-              },
+      if (!theoryAlloc || !theoryAlloc.facultyId) {
+        return {
+          isValid: false,
+          error: {
+            code: 'LAB_THEORY_ALLOCATION_REQUIRED',
+            message: `Theory course '${policy.linkedTheoryCourseCode}' must be allocated before allocating linked laboratory course '${courseCode}'.`,
+            details: {
+              courseCode,
+              linkedTheoryCourseCode: policy.linkedTheoryCourseCode,
             },
-          };
-        }
+          },
+        };
+      }
+
+      const expectedTheoryFacultyId = theoryAlloc.facultyId.trim();
+      if (primarySlot.facultyId.trim() !== expectedTheoryFacultyId) {
+        return {
+          isValid: false,
+          error: {
+            code: 'LAB_PRIMARY_THEORY_MISMATCH',
+            message: `LAB primary faculty '${primarySlot.facultyId}' must match the linked Theory course (${policy.linkedTheoryCourseCode}) assigned faculty '${expectedTheoryFacultyId}'.`,
+            details: {
+              courseCode,
+              linkedTheoryCourseCode: policy.linkedTheoryCourseCode,
+              expectedFacultyId: expectedTheoryFacultyId,
+              submittedFacultyId: primarySlot.facultyId,
+            },
+          },
+        };
       }
     }
   }
 
   // 6b. MC_SAS Role Validation
   if (policy.rule === ALLOCATION_RULES.MC_SAS) {
-    const mathsSlot = inputAssignments.find((a) => a.role === 'MATHS_BME');
-    const englishSlot = inputAssignments.find((a) => a.role === 'ENGLISH');
+    const allowedSasRoles = ['MATHS_BME', 'ENGLISH'];
+    for (const fa of inputAssignments) {
+      if (!fa.role || !allowedSasRoles.includes(fa.role)) {
+        return {
+          isValid: false,
+          error: {
+            code: 'SAS_INVALID_ROLE',
+            message: `Unknown or disallowed role '${fa.role}' for SAS allocation. Allowed roles are: MATHS_BME, ENGLISH.`,
+            details: { courseCode, role: fa.role },
+          },
+        };
+      }
+    }
 
-    if (!mathsSlot) {
+    const mathsSlots = inputAssignments.filter((a) => a.role === 'MATHS_BME');
+    const englishSlots = inputAssignments.filter((a) => a.role === 'ENGLISH');
+
+    if (mathsSlots.length === 0) {
       return {
         isValid: false,
         error: {
@@ -600,7 +811,18 @@ async function validateAllocationPayload({ academicContext, course, payload, exi
       };
     }
 
-    if (!englishSlot) {
+    if (mathsSlots.length > 1) {
+      return {
+        isValid: false,
+        error: {
+          code: 'SAS_DUPLICATE_ROLE',
+          message: 'SAS allocation can have only one MATHS_BME instructor.',
+          details: { courseCode, count: mathsSlots.length },
+        },
+      };
+    }
+
+    if (englishSlots.length === 0) {
       return {
         isValid: false,
         error: {
@@ -611,15 +833,66 @@ async function validateAllocationPayload({ academicContext, course, payload, exi
       };
     }
 
-    if (mathsSlot.facultyId.trim() === englishSlot.facultyId.trim()) {
+    if (englishSlots.length > 1) {
+      return {
+        isValid: false,
+        error: {
+          code: 'SAS_DUPLICATE_ROLE',
+          message: 'SAS allocation can have only one ENGLISH instructor.',
+          details: { courseCode, count: englishSlots.length },
+        },
+      };
+    }
+
+    if (mathsSlots[0].facultyId.trim() === englishSlots[0].facultyId.trim()) {
       return {
         isValid: false,
         error: {
           code: 'SAS_DUPLICATE_FACULTY',
           message: `The same faculty member cannot occupy both MATHS_BME and ENGLISH roles.`,
-          details: { courseCode, facultyId: mathsSlot.facultyId },
+          details: { courseCode, facultyId: mathsSlots[0].facultyId },
         },
       };
+    }
+
+    // Verify department eligibility: MATHS_BME -> Mathematics, ENGLISH -> English
+    for (const fa of inputAssignments) {
+      const facDoc = facultyDocsMap.get(fa.facultyId.trim());
+      const facDept = normalizeDepartment(facDoc.department);
+
+      if (fa.role === 'MATHS_BME') {
+        if (facDept !== 'MATHEMATICS') {
+          return {
+            isValid: false,
+            error: {
+              code: 'SAS_MATHS_BME_FACULTY_NOT_ELIGIBLE',
+              message: `Faculty '${facDoc.facultyName}' belongs to '${facDoc.department}', but MATHS_BME instructor must belong to the Department of Mathematics.`,
+              details: {
+                courseCode,
+                requiredDepartment: 'Mathematics',
+                facultyDepartment: facDoc.department,
+                facultyId: facDoc.facultyId,
+              },
+            },
+          };
+        }
+      } else if (fa.role === 'ENGLISH') {
+        if (facDept !== 'ENGLISH') {
+          return {
+            isValid: false,
+            error: {
+              code: 'SAS_ENGLISH_FACULTY_NOT_ELIGIBLE',
+              message: `Faculty '${facDoc.facultyName}' belongs to '${facDoc.department}', but ENGLISH instructor must belong to the Department of English.`,
+              details: {
+                courseCode,
+                requiredDepartment: 'English',
+                facultyDepartment: facDoc.department,
+                facultyId: facDoc.facultyId,
+              },
+            },
+          };
+        }
+      }
     }
   }
 
@@ -686,6 +959,11 @@ async function validateAllocationPayload({ academicContext, course, payload, exi
   };
 }
 
+const {
+  getEligibleFacultyByDepartment,
+  getEligibleFacultyBatch,
+} = require('./facultyEligibilityService');
+
 module.exports = {
   ALLOCATION_RULES,
   THEORY_LAB_LINKS,
@@ -694,4 +972,6 @@ module.exports = {
   getCourseAllocationPolicy,
   computeAllocationStatus,
   validateAllocationPayload,
+  getEligibleFacultyByDepartment,
+  getEligibleFacultyBatch,
 };

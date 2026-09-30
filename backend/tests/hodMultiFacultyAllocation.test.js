@@ -346,10 +346,159 @@ async function runTests() {
     assert(lab3PassRes.body.data?.allocationStatus === 'COMPLETE_3', 'Allocation status is COMPLETE_3');
     assert(lab3PassRes.body.data?.facultyAssignments?.length === 3, '3 faculty assignments persisted');
 
+    // Test 2.9: Invalid LAB role -> Reject (LAB_INVALID_ROLE)
+    const labInvalidRoleRes = await makeRequest(app, {
+      method: 'PUT',
+      path: `/api/hod-allocations/context/${ctxIII_A._id}/course/22CSP09`,
+      headers: authHeaders,
+      body: {
+        facultyAssignments: [
+          { facultyId: 'FWL-14', role: 'PRIMARY' },
+          { facultyId: 'FWL-06', role: 'THEORY' },
+        ],
+      },
+    });
+    assert(labInvalidRoleRes.statusCode === 400, 'Invalid LAB role rejected with HTTP 400');
+    assert(labInvalidRoleRes.body.error?.code === 'LAB_INVALID_ROLE', 'Error code is LAB_INVALID_ROLE');
+
+    // Test 2.10: Two PRIMARY roles -> Reject (LAB_DUPLICATE_ROLE)
+    const labTwoPrimaryRes = await makeRequest(app, {
+      method: 'PUT',
+      path: `/api/hod-allocations/context/${ctxIII_A._id}/course/22CSP09`,
+      headers: authHeaders,
+      body: {
+        facultyAssignments: [
+          { facultyId: 'FWL-14', role: 'PRIMARY' },
+          { facultyId: 'FWL-06', role: 'PRIMARY' },
+        ],
+      },
+    });
+    assert(labTwoPrimaryRes.statusCode === 400, 'Two PRIMARY roles rejected with HTTP 400');
+    assert(labTwoPrimaryRes.body.error?.code === 'LAB_DUPLICATE_ROLE', 'Error code is LAB_DUPLICATE_ROLE');
+
+    // Test 2.11: Two ADDITIONAL roles -> Reject (LAB_DUPLICATE_ROLE)
+    const labTwoAddRes = await makeRequest(app, {
+      method: 'PUT',
+      path: `/api/hod-allocations/context/${ctxIII_A._id}/course/22CSP09`,
+      headers: authHeaders,
+      body: {
+        facultyAssignments: [
+          { facultyId: 'FWL-14', role: 'PRIMARY' },
+          { facultyId: 'FWL-06', role: 'ADDITIONAL' },
+          { facultyId: 'FWL-04', role: 'ADDITIONAL' },
+        ],
+      },
+    });
+    assert(labTwoAddRes.statusCode === 400, 'Two ADDITIONAL roles rejected with HTTP 400');
+    assert(labTwoAddRes.body.error?.code === 'LAB_DUPLICATE_ROLE', 'Error code is LAB_DUPLICATE_ROLE');
+
+    // Test 2.12: Two OPTIONAL roles -> Reject (LAB_DUPLICATE_ROLE)
+    const labTwoOptRes = await makeRequest(app, {
+      method: 'PUT',
+      path: `/api/hod-allocations/context/${ctxIII_A._id}/course/22CSP09`,
+      headers: authHeaders,
+      body: {
+        facultyAssignments: [
+          { facultyId: 'FWL-14', role: 'PRIMARY' },
+          { facultyId: 'FWL-06', role: 'ADDITIONAL' },
+          { facultyId: 'FWL-04', role: 'OPTIONAL' },
+          { facultyId: 'FWL-12', role: 'OPTIONAL' },
+        ],
+      },
+    });
+    assert(labTwoOptRes.statusCode === 400, 'Two OPTIONAL roles rejected with HTTP 400');
+    assert(labTwoOptRes.body.error?.code === 'LAB_MAXIMUM_FACULTY_EXCEEDED' || labTwoOptRes.body.error?.code === 'LAB_DUPLICATE_ROLE', 'Error code indicates duplicate role or exceeded max');
+
+    // Test 2.13: Linked Theory course unallocated -> Reject (LAB_THEORY_ALLOCATION_REQUIRED)
+    // In ctxIII_A, ensure 22CSC16 is unallocated, then attempt allocating 22CSP10
+    await HODFacultyAllocation.deleteMany({ academicContextId: ctxIII_A._id, courseCode: '22CSC16' });
+    const labNoTheoryRes = await makeRequest(app, {
+      method: 'PUT',
+      path: `/api/hod-allocations/context/${ctxIII_A._id}/course/22CSP10`,
+      headers: authHeaders,
+      body: {
+        facultyAssignments: [
+          { facultyId: 'FWL-06', role: 'PRIMARY' },
+          { facultyId: 'FWL-14', role: 'ADDITIONAL' },
+        ],
+      },
+    });
+    assert(labNoTheoryRes.statusCode === 400, 'LAB allocation with unallocated Theory rejected with HTTP 400');
+    assert(labNoTheoryRes.body.error?.code === 'LAB_THEORY_ALLOCATION_REQUIRED', 'Error code is LAB_THEORY_ALLOCATION_REQUIRED');
+
+    // Restore 22CSC16 in ctxIII_A for downstream test suites
+    await HODFacultyAllocation.findOneAndUpdate(
+      { academicContextId: ctxIII_A._id, courseCode: '22CSC16' },
+      {
+        $set: {
+          academicContextId: ctxIII_A._id,
+          courseCode: '22CSC16',
+          courseName: 'Object Oriented Software Engineering',
+          facultyId: 'FWL-03',
+          facultyName: 'Dr. S. Karpusamy',
+          allocationRule: 'THEORY_SINGLE',
+          allocationType: 'THEORY',
+          facultyAssignments: [
+            { facultyId: 'FWL-03', facultyName: 'Dr. S. Karpusamy', role: 'THEORY', required: true, source: 'MANUAL' },
+          ],
+          status: 'APPROVED',
+        },
+      },
+      { upsert: true }
+    );
+
+    // Test 2.14: Inactive faculty -> Reject (LAB_FACULTY_INACTIVE)
+    let inactiveFac = await Faculty.findOne({ facultyId: 'FWL-INACTIVE-TEST' });
+    if (!inactiveFac) {
+      inactiveFac = await Faculty.create({
+        facultyId: 'FWL-INACTIVE-TEST',
+        facultyName: 'Dr. Inactive Tester',
+        department: 'CSE',
+        designation: 'Assistant Professor',
+        isActive: false,
+      });
+    } else if (inactiveFac.isActive !== false) {
+      inactiveFac.isActive = false;
+      await inactiveFac.save();
+    }
+    const labInactiveRes = await makeRequest(app, {
+      method: 'PUT',
+      path: `/api/hod-allocations/context/${ctxIII_A._id}/course/22CSP09`,
+      headers: authHeaders,
+      body: {
+        facultyAssignments: [
+          { facultyId: 'FWL-14', role: 'PRIMARY' },
+          { facultyId: 'FWL-INACTIVE-TEST', role: 'ADDITIONAL' },
+        ],
+      },
+    });
+    assert(labInactiveRes.statusCode === 400, 'Inactive faculty rejected with HTTP 400');
+    assert(labInactiveRes.body.error?.code === 'LAB_FACULTY_INACTIVE', 'Error code is LAB_FACULTY_INACTIVE');
+
     // ============================================================
     // SECTION 3: SOFT/ANALYTICAL SKILLS (MC_SAS: 22MAN8R / 22MAN04R)
     // ============================================================
     console.log('\n--- SECTION 3: SAS Allocation Validation (MATHS_BME + ENGLISH distinct) ---');
+
+    // Test 3.0: Slot-level eligible faculty filter in GET context
+    const getSasContext = await makeRequest(app, {
+      method: 'GET',
+      path: `/api/hod-allocations/context/${ctxIII_A._id}`,
+      headers: authHeaders,
+    });
+    assert(getSasContext.statusCode === 200, 'GET context returns HTTP 200');
+    const sasCrs = getSasContext.body.data.courses.find((c) => c.allocationRule === 'MC_SAS');
+    assert(!!sasCrs, 'Context contains MC_SAS course');
+    const mathsSlot = sasCrs.facultySlots.find((s) => s.role === 'MATHS_BME');
+    const engSlot = sasCrs.facultySlots.find((s) => s.role === 'ENGLISH');
+    assert(mathsSlot.eligibleDepartment === 'MATHEMATICS', 'MATHS_BME eligibleDepartment is MATHEMATICS');
+    assert(engSlot.eligibleDepartment === 'ENGLISH', 'ENGLISH eligibleDepartment is ENGLISH');
+    assert(mathsSlot.eligibleFaculty.length === 16, `MATHS_BME has exactly 16 eligible faculty (got: ${mathsSlot.eligibleFaculty.length})`);
+    assert(engSlot.eligibleFaculty.length === 9, `ENGLISH has exactly 9 eligible faculty (got: ${engSlot.eligibleFaculty.length})`);
+    assert(mathsSlot.eligibleFaculty.some((f) => f.facultyName === 'Dr. Murugapandian G S'), 'MATHS_BME includes HOD Dr. Murugapandian G S');
+    assert(engSlot.eligibleFaculty.some((f) => f.facultyName === 'Dr. Kavitha P'), 'ENGLISH includes HOD Dr. Kavitha P');
+    assert(mathsSlot.eligibleFaculty.every((f) => f.department.includes('Mathematics')), 'All MATHS_BME faculty belong to Mathematics');
+    assert(engSlot.eligibleFaculty.every((f) => f.department.includes('English')), 'All ENGLISH faculty belong to English');
 
     // Test 3.1: Missing MATHS_BME -> Reject (SAS_MATHS_BME_REQUIRED)
     const sasMissingMaths = await makeRequest(app, {
@@ -358,7 +507,7 @@ async function runTests() {
       headers: authHeaders,
       body: {
         facultyAssignments: [
-          { facultyId: 'FWL-01', role: 'ENGLISH' },
+          { facultyId: 'ENG-001', role: 'ENGLISH' },
         ],
       },
     });
@@ -372,7 +521,7 @@ async function runTests() {
       headers: authHeaders,
       body: {
         facultyAssignments: [
-          { facultyId: 'FWL-01', role: 'MATHS_BME' },
+          { facultyId: 'MAT-001', role: 'MATHS_BME' },
         ],
       },
     });
@@ -386,28 +535,159 @@ async function runTests() {
       headers: authHeaders,
       body: {
         facultyAssignments: [
-          { facultyId: 'FWL-01', role: 'MATHS_BME' },
-          { facultyId: 'FWL-01', role: 'ENGLISH' },
+          { facultyId: 'MAT-001', role: 'MATHS_BME' },
+          { facultyId: 'MAT-001', role: 'ENGLISH' },
         ],
       },
     });
     assert(sasSameFac.statusCode === 400, 'Same faculty in both SAS roles rejected with HTTP 400');
     assert(sasSameFac.body.error?.code === 'SAS_DUPLICATE_FACULTY', 'Error code is SAS_DUPLICATE_FACULTY');
 
-    // Test 3.4: Both distinct faculty present -> PASS (COMPLETE)
+    // Test 3.3b: Invalid SAS role -> Reject (SAS_INVALID_ROLE)
+    const sasInvalidRole = await makeRequest(app, {
+      method: 'PUT',
+      path: `/api/hod-allocations/context/${ctxIII_A._id}/course/22MAN8R`,
+      headers: authHeaders,
+      body: {
+        facultyAssignments: [
+          { facultyId: 'MAT-001', role: 'MATHS_BME' },
+          { facultyId: 'ENG-001', role: 'PRIMARY' },
+        ],
+      },
+    });
+    assert(sasInvalidRole.statusCode === 400, 'Invalid SAS role rejected with HTTP 400');
+    assert(sasInvalidRole.body.error?.code === 'SAS_INVALID_ROLE', 'Error code is SAS_INVALID_ROLE');
+
+    // Test 3.3c: Duplicate role (two MATHS_BME) -> Reject (SAS_DUPLICATE_ROLE)
+    const sasTwoMaths = await makeRequest(app, {
+      method: 'PUT',
+      path: `/api/hod-allocations/context/${ctxIII_A._id}/course/22MAN8R`,
+      headers: authHeaders,
+      body: {
+        facultyAssignments: [
+          { facultyId: 'MAT-001', role: 'MATHS_BME' },
+          { facultyId: 'MAT-002', role: 'MATHS_BME' },
+        ],
+      },
+    });
+    assert(sasTwoMaths.statusCode === 400, 'Two MATHS_BME roles rejected with HTTP 400');
+    assert(sasTwoMaths.body.error?.code === 'SAS_DUPLICATE_ROLE', 'Error code is SAS_DUPLICATE_ROLE');
+
+    // Test 3.3d: Third faculty added -> Reject (SAS_INVALID_ROLE)
+    const sasThreeFac = await makeRequest(app, {
+      method: 'PUT',
+      path: `/api/hod-allocations/context/${ctxIII_A._id}/course/22MAN8R`,
+      headers: authHeaders,
+      body: {
+        facultyAssignments: [
+          { facultyId: 'MAT-001', role: 'MATHS_BME' },
+          { facultyId: 'ENG-001', role: 'ENGLISH' },
+          { facultyId: 'ENG-002', role: 'ENGLISH' },
+        ],
+      },
+    });
+    assert(sasThreeFac.statusCode === 400, 'Third faculty added rejected with HTTP 400');
+    assert(sasThreeFac.body.error?.code === 'SAS_INVALID_ROLE', 'Error code is SAS_INVALID_ROLE');
+
+    // Test 3.3e: Mathematics slot assigned English faculty -> Reject (SAS_MATHS_BME_FACULTY_NOT_ELIGIBLE)
+    const sasMathsWrongDept = await makeRequest(app, {
+      method: 'PUT',
+      path: `/api/hod-allocations/context/${ctxIII_A._id}/course/22MAN8R`,
+      headers: authHeaders,
+      body: {
+        facultyAssignments: [
+          { facultyId: 'ENG-001', role: 'MATHS_BME' },
+          { facultyId: 'ENG-002', role: 'ENGLISH' },
+        ],
+      },
+    });
+    assert(sasMathsWrongDept.statusCode === 400, 'English faculty in MATHS_BME slot rejected with HTTP 400');
+    assert(sasMathsWrongDept.body.error?.code === 'SAS_MATHS_BME_FACULTY_NOT_ELIGIBLE', 'Error code is SAS_MATHS_BME_FACULTY_NOT_ELIGIBLE');
+
+    // Test 3.3f: English slot assigned Mathematics faculty -> Reject (SAS_ENGLISH_FACULTY_NOT_ELIGIBLE)
+    const sasEngWrongDept = await makeRequest(app, {
+      method: 'PUT',
+      path: `/api/hod-allocations/context/${ctxIII_A._id}/course/22MAN8R`,
+      headers: authHeaders,
+      body: {
+        facultyAssignments: [
+          { facultyId: 'MAT-001', role: 'MATHS_BME' },
+          { facultyId: 'MAT-002', role: 'ENGLISH' },
+        ],
+      },
+    });
+    assert(sasEngWrongDept.statusCode === 400, 'Mathematics faculty in ENGLISH slot rejected with HTTP 400');
+    assert(sasEngWrongDept.body.error?.code === 'SAS_ENGLISH_FACULTY_NOT_ELIGIBLE', 'Error code is SAS_ENGLISH_FACULTY_NOT_ELIGIBLE');
+
+    // Test 3.3g: Unknown Mathematics faculty ID -> Reject (SAS_FACULTY_NOT_FOUND)
+    const sasUnknownMaths = await makeRequest(app, {
+      method: 'PUT',
+      path: `/api/hod-allocations/context/${ctxIII_A._id}/course/22MAN8R`,
+      headers: authHeaders,
+      body: {
+        facultyAssignments: [
+          { facultyId: 'MAT-NONEXISTENT', role: 'MATHS_BME' },
+          { facultyId: 'ENG-001', role: 'ENGLISH' },
+        ],
+      },
+    });
+    assert(sasUnknownMaths.statusCode === 400, 'Unknown Mathematics faculty rejected with HTTP 400');
+    assert(sasUnknownMaths.body.error?.code === 'SAS_FACULTY_NOT_FOUND', 'Error code is SAS_FACULTY_NOT_FOUND');
+
+    // Test 3.3h: Inactive Mathematics faculty -> Reject (SAS_FACULTY_INACTIVE)
+    await Faculty.create({
+      facultyId: 'MAT-INACTIVE-TEST',
+      facultyName: 'Inactive Maths Tester',
+      designation: 'Assistant Professor',
+      department: 'Department of Mathematics',
+      email: 'inactive_maths@nec.edu.in',
+      isActive: false,
+    });
+    const sasInactiveMaths = await makeRequest(app, {
+      method: 'PUT',
+      path: `/api/hod-allocations/context/${ctxIII_A._id}/course/22MAN8R`,
+      headers: authHeaders,
+      body: {
+        facultyAssignments: [
+          { facultyId: 'MAT-INACTIVE-TEST', role: 'MATHS_BME' },
+          { facultyId: 'ENG-001', role: 'ENGLISH' },
+        ],
+      },
+    });
+    assert(sasInactiveMaths.statusCode === 400, 'Inactive Mathematics faculty rejected with HTTP 400');
+    assert(sasInactiveMaths.body.error?.code === 'SAS_FACULTY_INACTIVE', 'Error code is SAS_FACULTY_INACTIVE');
+    await Faculty.deleteOne({ facultyId: 'MAT-INACTIVE-TEST' });
+
+    // Test 3.4: HOD of Mathematics + HOD of English -> PASS (COMPLETE)
+    const sasHODPass = await makeRequest(app, {
+      method: 'PUT',
+      path: `/api/hod-allocations/context/${ctxIII_A._id}/course/22MAN8R`,
+      headers: authHeaders,
+      body: {
+        facultyAssignments: [
+          { facultyId: 'MAT-001', role: 'MATHS_BME' },
+          { facultyId: 'ENG-001', role: 'ENGLISH' },
+        ],
+      },
+    });
+    assert(sasHODPass.statusCode === 200, 'Valid SAS HOD allocation succeeds with HTTP 200');
+    assert(sasHODPass.body.data?.allocationStatus === 'COMPLETE', 'SAS allocationStatus is COMPLETE');
+
+    // Test 3.5: Any active Mathematics faculty + Any active English faculty -> PASS (COMPLETE)
     const sasPass = await makeRequest(app, {
       method: 'PUT',
       path: `/api/hod-allocations/context/${ctxIII_A._id}/course/22MAN8R`,
       headers: authHeaders,
       body: {
         facultyAssignments: [
-          { facultyId: 'FWL-01', role: 'MATHS_BME' },
-          { facultyId: 'FWL-02', role: 'ENGLISH' },
+          { facultyId: 'MAT-002', role: 'MATHS_BME' },
+          { facultyId: 'ENG-002', role: 'ENGLISH' },
         ],
       },
     });
-    assert(sasPass.statusCode === 200, 'Valid SAS allocation succeeds with HTTP 200');
+    assert(sasPass.statusCode === 200, 'Valid active SAS pair succeeds with HTTP 200');
     assert(sasPass.body.data?.allocationStatus === 'COMPLETE', 'SAS allocationStatus is COMPLETE');
+
 
     // ============================================================
     // SECTION 4: INDIAN CONSTITUTION (MC_DEPARTMENT: 22MAN09)
@@ -717,6 +997,9 @@ async function runTests() {
       await AcademicContext.findByIdAndDelete(ctxI_A._id);
       await HODFacultyAllocation.deleteMany({ academicContextId: ctxI_A._id });
     }
+
+    // Clean up temporary test faculty
+    await Faculty.deleteMany({ facultyId: 'FWL-INACTIVE-TEST' });
 
     // Restore baseline 2-faculty allocation for 22CSP09 in III-A
     await HODFacultyAllocation.findOneAndUpdate(

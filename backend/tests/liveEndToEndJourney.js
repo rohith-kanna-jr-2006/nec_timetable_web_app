@@ -23,6 +23,7 @@ const http = require('http');
 const mongoose = require('mongoose');
 const app = require('../src/app');
 const { connectDB, disconnectDB } = require('../src/config/db');
+const HODFacultyAllocation = require('../src/models/HODFacultyAllocation');
 
 let passCount = 0;
 let failCount = 0;
@@ -200,48 +201,33 @@ async function runLiveJourney() {
         ],
       },
       '22MAN8R': {
-        facultyId: 'FWL-01',
+        facultyId: 'MAT-001',
         rule: 'MC_SAS',
         assignments: [
-          { facultyId: 'FWL-01', role: 'MATHS_BME' },
-          { facultyId: 'FWL-02', role: 'ENGLISH' },
+          { facultyId: 'MAT-001', role: 'MATHS_BME' },
+          { facultyId: 'ENG-001', role: 'ENGLISH' },
         ],
       },
     };
 
-    const HODFacultyAllocation = require('../src/models/HODFacultyAllocation');
-    for (const [courseCode, config] of Object.entries(facultyMap)) {
-      const isLab = courseCode.includes('P');
-      const isSas = courseCode === '22MAN8R';
-      const assignments = config.assignments.map((a) => {
-        const fac = facultyList.find((f) => f.facultyId === a.facultyId);
-        return {
-          facultyId: a.facultyId,
-          facultyName: fac?.facultyName || a.facultyId,
-          role: a.role,
-          required: a.role !== 'OPTIONAL',
-          source: a.role === 'PRIMARY' ? 'THEORY_LINKED' : 'MANUAL',
-        };
+
+    // Authoritative HOD allocations via real HTTP API:
+    // First allocate Theory courses, followed by Theory-linked LABs and SAS
+    const orderedCoursesToAllocate = ['22CSC14', '22CSC15', '22CSC16', '22CSP09', '22CSP10', '22MAN8R'];
+
+    for (const courseCode of orderedCoursesToAllocate) {
+      const config = facultyMap[courseCode];
+      const putRes = await makeRequest(app, {
+        method: 'PUT',
+        path: `/api/hod-allocations/context/${targetContext._id}/course/${courseCode}`,
+        headers: { Authorization: `Bearer ${hodToken}` },
+        body: {
+          facultyAssignments: config.assignments,
+        },
       });
 
-      await HODFacultyAllocation.findOneAndUpdate(
-        { academicContextId: targetContext._id, courseCode },
-        {
-          $set: {
-            academicContextId: targetContext._id,
-            courseCode,
-            courseName: semCourses.find((c) => c.courseCode === courseCode)?.courseName || courseCode,
-            facultyId: config.facultyId,
-            facultyName: facultyList.find((f) => f.facultyId === config.facultyId)?.facultyName || config.facultyId,
-            allocationRule: config.rule || (isLab ? 'LAB_2_TO_3' : isSas ? 'MC_SAS' : 'THEORY_SINGLE'),
-            allocationType: isLab ? 'LAB_PRIMARY' : isSas ? 'SAS' : 'THEORY',
-            facultyAssignments: assignments,
-            status: 'APPROVED',
-            assignedBy: 'HOD',
-          },
-        },
-        { upsert: true, new: true }
-      );
+      assert(putRes.statusCode === 200, `PUT allocation for ${courseCode} via real HTTP API returns HTTP 200`);
+      assert(putRes.body.success === true, `Allocation for ${courseCode} returns success: true`);
     }
 
     const revalRes = await makeRequest(app, {
