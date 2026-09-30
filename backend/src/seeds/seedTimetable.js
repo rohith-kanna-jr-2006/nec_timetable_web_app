@@ -26,26 +26,40 @@ async function seedTimetable() {
     });
   }
 
-  // Clear existing seeded timetable sessions and versions
-  await TimetableSession.deleteMany({});
-  await TimetableVersion.deleteMany({});
-
-  const version = await TimetableVersion.create({
+  // Idempotently locate or create the baseline published version for III-A
+  let version = await TimetableVersion.findOne({
     academicYear: '2026-27',
     semester: 'Odd Semester',
     department: 'CSE',
     year: 'III Year',
     section: 'A',
-    version: 1,
-    versionLabel: 'v1.0 (Official Semester Rollout)',
     status: 'PUBLISHED',
-    generatedBy: 'Mr. R. Manikandan (AC)',
-    submittedBy: 'Mr. R. Manikandan (AC)',
-    approvedBy: 'Dr. T. Rajasekaran (HOD)',
-    approvedAt: new Date(),
-    publishedAt: new Date(),
-    hardConflicts: 0,
-    totalScheduledPeriods: 35,
+  });
+
+  if (!version) {
+    version = await TimetableVersion.create({
+      academicYear: '2026-27',
+      semester: 'Odd Semester',
+      department: 'CSE',
+      year: 'III Year',
+      section: 'A',
+      version: 1,
+      versionLabel: 'v1.0 (Official Semester Rollout)',
+      status: 'PUBLISHED',
+      generatedBy: 'Mr. R. Manikandan (AC)',
+      submittedBy: 'Mr. R. Manikandan (AC)',
+      approvedBy: 'Dr. T. Rajasekaran (HOD)',
+      approvedAt: new Date(),
+      publishedAt: new Date(),
+      hardConflicts: 0,
+      totalScheduledPeriods: 35,
+    });
+  }
+
+  // Safe idempotent reset: only replace sessions belonging to this specific context and version
+  await TimetableSession.deleteMany({
+    timetableVersionId: version._id,
+    academicContextId: context._id,
   });
 
   const sessions = [
@@ -518,8 +532,6 @@ async function seedTimetable() {
   const inserted = await TimetableSession.insertMany(sessions);
   console.log(`[Seed] Successfully seeded ${inserted.length} timetable sessions across Mon-Fri.`);
 
-  // Seed authoritative HOD faculty allocations for all scheduled curriculum courses
-  await HODFacultyAllocation.deleteMany({});
   const hodAllocsMap = new Map();
 
   sessions.forEach((s) => {
@@ -569,10 +581,19 @@ async function seedTimetable() {
     });
   }
 
-  const insertedAllocs = await HODFacultyAllocation.insertMany(Array.from(hodAllocsMap.values()));
-  console.log(`[Seed] Successfully seeded ${insertedAllocs.length} authoritative HOD faculty allocations.`);
+  // Idempotently upsert authoritative HOD faculty allocations without destroying other contexts
+  const upsertedAllocs = [];
+  for (const alloc of hodAllocsMap.values()) {
+    const doc = await HODFacultyAllocation.findOneAndUpdate(
+      { academicContextId: alloc.academicContextId, courseCode: alloc.courseCode },
+      { $set: alloc },
+      { upsert: true, new: true }
+    );
+    upsertedAllocs.push(doc);
+  }
+  console.log(`[Seed] Successfully seeded/updated ${upsertedAllocs.length} authoritative HOD faculty allocations.`);
 
-  return { version, sessions: inserted, hodAllocations: insertedAllocs };
+  return { version, sessions: inserted, hodAllocations: upsertedAllocs };
 }
 
 module.exports = { seedTimetable };

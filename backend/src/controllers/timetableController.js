@@ -11,6 +11,7 @@ const {
   getClassSchedule,
 } = require('../services/timetableService');
 const { ConstraintBuilderError } = require('../services/timetable/constraintBuilder');
+const { getAcademicContextWorkflowStatus } = require('../services/contextStatusService');
 const { successResponse, errorResponse } = require('../utils/responseHandler');
 
 /**
@@ -115,7 +116,10 @@ async function getFacultyTimetable(req, res, next) {
 }
 
 /**
- * Get schedule for a class
+ * Get schedule for a class.
+ * Public default returns strictly PUBLISHED timetable.
+ * If no published timetable exists, returns actionable workflow state (e.g. READY_FOR_GENERATION, ALLOCATION_INCOMPLETE)
+ * rather than a generic dead-end.
  * GET /api/timetable/class/:academicContextId
  */
 async function getClassTimetable(req, res, next) {
@@ -128,10 +132,47 @@ async function getClassTimetable(req, res, next) {
       return errorResponse(res, 'Academic context not found', 404, 'NOT_FOUND');
     }
 
+    // Check if published version exists
+    const publishedVersion = await TimetableVersion.findOne({
+      academicYear: context.academicYear,
+      semester: context.semester,
+      department: context.department,
+      ...(context.year ? { year: context.year } : {}),
+      ...(context.section ? { section: context.section } : {}),
+      status: 'PUBLISHED',
+    }).sort({ publishedAt: -1, createdAt: -1 });
+
+    // If no published version exists and no specific version was requested:
+    // Missing Timetable != Missing Data! Return actionable workflow state.
+    if (!publishedVersion && !versionId) {
+      const workflow = await getAcademicContextWorkflowStatus(context._id);
+      return successResponse(res, {
+        academicContextId: context._id,
+        academicContext: {
+          id: context._id,
+          academicYear: context.academicYear,
+          semester: context.semester,
+          department: context.department,
+          year: context.year,
+          section: context.section,
+          program: context.program,
+          status: context.status,
+        },
+        isPublished: false,
+        state: workflow.state,
+        nextAction: workflow.nextAction,
+        message: workflow.message || 'No published timetable version found for this class.',
+        sessionCount: 0,
+        sessions: [],
+        workflow,
+      });
+    }
+
     const sessions = await getClassSchedule(academicContextId, versionId);
     return successResponse(res, {
-      academicContextId,
+      academicContextId: context._id,
       academicContext: {
+        id: context._id,
         academicYear: context.academicYear,
         semester: context.semester,
         department: context.department,
@@ -140,9 +181,34 @@ async function getClassTimetable(req, res, next) {
         program: context.program,
         status: context.status,
       },
+      isPublished: !!publishedVersion,
+      timetableVersionId: publishedVersion ? publishedVersion._id : versionId || null,
       sessionCount: sessions.length,
       sessions,
     });
+  } catch (error) {
+    next(error);
+  }
+}
+
+/**
+ * Get current timetable workflow lifecycle status for an academic context
+ * GET /api/timetable/context-status/:academicContextId
+ * GET /api/timetable/status/:academicContextId
+ */
+async function getContextStatus(req, res, next) {
+  try {
+    const { academicContextId } = req.params;
+    const result = await getAcademicContextWorkflowStatus(academicContextId);
+
+    if (!result.success && result.statusCode === 404) {
+      return errorResponse(res, result.message, 404, result.code);
+    }
+    if (!result.success) {
+      return errorResponse(res, result.message, result.statusCode || 400, result.code);
+    }
+
+    return successResponse(res, result);
   } catch (error) {
     next(error);
   }
@@ -581,6 +647,7 @@ async function solveTimetable(req, res, next) {
         HOD_ALLOCATION_CONFLICT: 409,
         HOD_FACULTY_MISMATCH: 409,
         COURSE_SEMESTER_MISMATCH: 409,
+        ELECTIVE_SELECTION_REQUIRED: 409,
         VERSION_LOCKED: 409,
         FACULTY_INACTIVE: 409,
       };
@@ -598,6 +665,7 @@ module.exports = {
   transitionVersion,
   getFacultyTimetable,
   getClassTimetable,
+  getContextStatus,
   getPublishedClassTimetable,
   getReviewMatrix,
   createSession,

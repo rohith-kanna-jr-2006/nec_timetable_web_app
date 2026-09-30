@@ -133,17 +133,13 @@ async function getFacultySchedule(facultyId, versionId = null) {
   if (versionId) {
     filter.timetableVersionId = versionId;
   } else {
-    // Isolate published versions to prevent historical session leakage
+    // Only published versions populate public faculty schedule to prevent draft session leakage
     const publishedVersions = await TimetableVersion.find({ status: 'PUBLISHED' });
     if (publishedVersions.length > 0) {
       filter.timetableVersionId = { $in: publishedVersions.map((v) => v._id) };
     } else {
-      const activeVersions = await TimetableVersion.find({
-        status: { $in: ['APPROVED', 'PENDING_HOD_APPROVAL', 'GENERATED'] },
-      }).sort({ updatedAt: -1 }).limit(10);
-      if (activeVersions.length > 0) {
-        filter.timetableVersionId = { $in: activeVersions.map((v) => v._id) };
-      }
+      // If no published versions exist, do not leak draft sessions into public faculty schedule
+      return [];
     }
   }
   return TimetableSession.find(filter).sort({ day: 1, period: 1 });
@@ -151,40 +147,33 @@ async function getFacultySchedule(facultyId, versionId = null) {
 
 /**
  * Retrieves timetable sessions for an academic context (class).
- * Strictly enforces context and version isolation.
+ * Strictly enforces context and published version isolation.
  */
 async function getClassSchedule(academicContextId, versionId = null) {
   const filter = { academicContextId };
   if (versionId) {
     filter.timetableVersionId = versionId;
   } else {
-    // Resolve single authoritative version for this context
+    // Strictly isolate to PUBLISHED version for default class schedule
     const context = await AcademicContext.findById(academicContextId);
-    if (context) {
-      let version = await TimetableVersion.findOne({
-        academicYear: context.academicYear,
-        semester: context.semester,
-        department: context.department,
-        ...(context.year ? { year: context.year } : {}),
-        ...(context.section ? { section: context.section } : {}),
-        status: 'PUBLISHED',
-      }).sort({ publishedAt: -1, createdAt: -1 });
-
-      if (!version) {
-        version = await TimetableVersion.findOne({
-          academicYear: context.academicYear,
-          semester: context.semester,
-          department: context.department,
-          ...(context.year ? { year: context.year } : {}),
-          ...(context.section ? { section: context.section } : {}),
-          status: { $in: ['APPROVED', 'PENDING_HOD_APPROVAL', 'GENERATED', 'DRAFT'] },
-        }).sort({ updatedAt: -1, createdAt: -1 });
-      }
-
-      if (version) {
-        filter.timetableVersionId = version._id;
-      }
+    if (!context) {
+      return [];
     }
+
+    const publishedVersion = await TimetableVersion.findOne({
+      academicYear: context.academicYear,
+      semester: context.semester,
+      department: context.department,
+      ...(context.year ? { year: context.year } : {}),
+      ...(context.section ? { section: context.section } : {}),
+      status: 'PUBLISHED',
+    }).sort({ publishedAt: -1, createdAt: -1 });
+
+    if (!publishedVersion) {
+      // No published version exists: return empty array, do NOT leak unpublished drafts
+      return [];
+    }
+    filter.timetableVersionId = publishedVersion._id;
   }
   return TimetableSession.find(filter).sort({ day: 1, period: 1 });
 }

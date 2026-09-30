@@ -551,7 +551,37 @@ Get scheduled sessions for a faculty member.
 
 ### `GET /api/timetable/class/:academicContextId`
 Get class timetable grid.
-- **Query Params**: `versionId` (optional; defaults to published or active version for the class)
+- **Query Params**: `versionId` (optional; defaults strictly to published version)
+- **Missing Timetable != Missing Data**: When a valid context has no published timetable, returns HTTP 200 with actionable workflow state:
+  ```json
+  {
+    "success": true,
+    "academicContextId": "6aba...",
+    "isPublished": false,
+    "state": "READY_FOR_GENERATION" | "ALLOCATION_INCOMPLETE",
+    "nextAction": "GENERATE_TIMETABLE" | "ALLOCATE_FACULTY",
+    "message": "...",
+    "sessionCount": 0,
+    "sessions": [],
+    "workflow": { ... }
+  }
+  ```
+
+### `GET /api/timetable/context-status/:academicContextId`
+Evaluates the full academic and timetable lifecycle workflow state for any valid academic context in CSE.
+- **Aliases**: `GET /api/timetable/status/:academicContextId`
+- **Response**:
+  ```json
+  {
+    "success": true,
+    "state": "READY_FOR_GENERATION" | "ALLOCATION_INCOMPLETE" | "TIMETABLE_GENERATED" | "PENDING_HOD_APPROVAL" | "APPROVED" | "PUBLISHED",
+    "nextAction": "GENERATE_TIMETABLE" | "ALLOCATE_FACULTY" | "SUBMIT_FOR_APPROVAL" | "HOD_APPROVAL" | "PUBLISH_TIMETABLE" | "VIEW_PUBLISHED",
+    "academicContext": { ... },
+    "curriculum": { "available": true, "courseCount": 10, "coreCount": 10, "electiveSlotsCount": 0 },
+    "allocation": { "complete": true, "requiredCount": 10, "allocatedCount": 10, "missing": [] },
+    "timetable": { "exists": false, "isPublished": false }
+  }
+  ```
 
 ### `GET /api/timetable/published/:academicContextId`
 Get current published timetable for a class.

@@ -178,7 +178,7 @@ async function runLiveJourney() {
     const facultyList = (facRes.body.data && (facRes.body.data.faculty || facRes.body.data.items)) || [];
     assert(facultyList.length >= 6, 'Sufficient active faculty found in directory');
 
-    // Create allocations for target courses
+    // Create allocations for all 6 core courses dynamically
     const facultyMap = {
       '22CSC14': 'FWL-04',
       '22CSC15': 'FWL-05',
@@ -196,9 +196,9 @@ async function runLiveJourney() {
           $set: {
             academicContextId: targetContext._id,
             courseCode,
-            courseName: semCourses.find(c => c.courseCode === courseCode)?.courseName || courseCode,
+            courseName: semCourses.find((c) => c.courseCode === courseCode)?.courseName || courseCode,
             facultyId,
-            facultyName: facultyList.find(f => f.facultyId === facultyId)?.facultyName || facultyId,
+            facultyName: facultyList.find((f) => f.facultyId === facultyId)?.facultyName || facultyId,
             allocationType: courseCode.includes('P') ? 'LAB_PRIMARY' : 'THEORY',
             status: 'APPROVED',
             assignedBy: 'HOD',
@@ -214,7 +214,7 @@ async function runLiveJourney() {
       headers: { Authorization: `Bearer ${hodToken}` },
     });
     assert(revalRes.body.data.readyForGeneration === true, 'Cohort allocations are 100% complete and ready for generation');
-    assert(revalRes.body.data.allocatedCount === 6, 'All 6 Semester V courses allocated');
+    assert(revalRes.body.data.allocatedCount === 6, 'All 6 Semester V core courses allocated');
 
     // ------------------------------------------------------------
     // STEP 6: Authenticate as Academic Coordinator
@@ -232,21 +232,33 @@ async function runLiveJourney() {
     assert(acUser.role === 'AC', `AC role verified (got: '${acUser.role}')`);
 
     // ------------------------------------------------------------
-    // STEP 7: Generate Timetable via CSP Solver
+    // STEP 7: Generate Timetable via CSP Solver (Dynamic Assignment Plan)
     // ------------------------------------------------------------
-    console.log('\n--- STEP 7: Generate Timetable via CSP Solver ---');
+    console.log('\n--- STEP 7: Generate Timetable via CSP Solver (Dynamic Active Set) ---');
+    // Dynamically retrieve the authoritative allocations to construct assignmentPlan
+    const activeAllocations = await HODFacultyAllocation.find({
+      academicContextId: targetContext._id,
+      status: 'APPROVED',
+    }).sort({ courseCode: 1 });
+
+    const dynamicAssignmentPlan = activeAllocations.map((a) => {
+      const crs = semCourses.find((c) => c.courseCode === a.courseCode);
+      return {
+        courseCode: a.courseCode,
+        facultyId: a.facultyId,
+        requiredPeriods: crs && crs.totalPeriod ? crs.totalPeriod : 4,
+      };
+    });
+
+    const expectedTotalSessions = dynamicAssignmentPlan.reduce((sum, item) => sum + item.requiredPeriods, 0);
+
     const genRes = await makeRequest(app, {
       method: 'POST',
       path: '/api/timetable/generate',
       headers: { Authorization: `Bearer ${acToken}` },
       body: {
         academicContextId: targetContext._id,
-        assignmentPlan: [
-          { courseCode: '22CSC14', facultyId: 'FWL-04', requiredPeriods: 4 },
-          { courseCode: '22CSC15', facultyId: 'FWL-05', requiredPeriods: 4 },
-          { courseCode: '22CSC16', facultyId: 'FWL-06', requiredPeriods: 4 },
-          { courseCode: '22CSP09', facultyId: 'FWL-14', requiredPeriods: 4 },
-        ],
+        assignmentPlan: dynamicAssignmentPlan,
         generationSeed: 123456,
       },
     });
@@ -256,7 +268,7 @@ async function runLiveJourney() {
     assert(liveVersion && liveVersion._id, 'Generation created a TimetableVersion record');
     assert(liveVersion.status === 'GENERATED', `Generated version status is 'GENERATED' (got: '${liveVersion.status}')`);
     const sessionsCreated = genRes.body.data.sessionsCreated;
-    assert(sessionsCreated === 16, `Total 16 sessions created for 4 courses (got: ${sessionsCreated})`);
+    assert(sessionsCreated === expectedTotalSessions, `Total ${expectedTotalSessions} sessions created for dynamic active course set (got: ${sessionsCreated})`);
 
     // ------------------------------------------------------------
     // STEP 8: Fetch Review Matrix
@@ -268,11 +280,11 @@ async function runLiveJourney() {
       headers: { Authorization: `Bearer ${acToken}` },
     });
     assert(matrixRes.statusCode === 200, 'GET /api/timetable/review-matrix returns HTTP 200');
-    assert(matrixRes.body.data.sessionCount === 16, `Review matrix returns exact generated session count 16 (got: ${matrixRes.body.data.sessionCount})`);
+    assert(matrixRes.body.data.sessionCount === expectedTotalSessions, `Review matrix returns exact generated session count ${expectedTotalSessions} (got: ${matrixRes.body.data.sessionCount})`);
     assert(matrixRes.body.data.academicContext.section === 'B', 'Review matrix maps to Section B');
 
     // ------------------------------------------------------------
-    // STEP 9: Fetch Class Timetable
+    // STEP 9: Fetch Class Timetable (Internal View with Version ID)
     // ------------------------------------------------------------
     console.log('\n--- STEP 9: Fetch Class Timetable ---');
     const classRes = await makeRequest(app, {
@@ -281,7 +293,7 @@ async function runLiveJourney() {
       headers: { Authorization: `Bearer ${acToken}` },
     });
     assert(classRes.statusCode === 200, 'GET /api/timetable/class/:academicContextId returns HTTP 200');
-    assert(classRes.body.data.sessionCount === 16, 'Class timetable returns 16 sessions');
+    assert(classRes.body.data.sessionCount === expectedTotalSessions, `Class timetable returns ${expectedTotalSessions} sessions`);
 
     // ------------------------------------------------------------
     // STEP 10: Fetch Faculty Timetable for Assigned Faculty
@@ -343,9 +355,9 @@ async function runLiveJourney() {
       path: `/api/timetable/class/${targetContext._id}`,
     });
     assert(pubRes.statusCode === 200, 'GET /api/timetable/class/:id (published) returns HTTP 200');
-    assert(pubRes.body.data.sessionCount === 16, `Default public class timetable now serves 16 sessions (got: ${pubRes.body.data.sessionCount})`);
+    assert(pubRes.body.data.sessionCount === expectedTotalSessions, `Default public class timetable now serves ${expectedTotalSessions} sessions (got: ${pubRes.body.data.sessionCount})`);
     const finalSessions = pubRes.body.data.sessions || [];
-    const allMatchVersion = finalSessions.every(s => s.timetableVersionId === liveVersion._id.toString());
+    const allMatchVersion = finalSessions.every((s) => s.timetableVersionId === liveVersion._id.toString());
     assert(allMatchVersion, 'All public class sessions belong to the approved & published timetable version');
 
     console.log('\n============================================================');

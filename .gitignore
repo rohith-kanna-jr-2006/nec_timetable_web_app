@@ -1,4 +1,4 @@
-﻿# Dependencies
+# Dependencies
 node_modules/
 web/node_modules/
 backend/node_modules/
@@ -45,7 +45,3 @@ screenshot*.jpeg
 *screenshot*.jpeg
 *.webm
 *.mp4
-
-
-#documents
-docs/

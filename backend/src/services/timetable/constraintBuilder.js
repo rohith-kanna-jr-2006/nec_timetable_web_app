@@ -13,6 +13,8 @@ const Faculty = require('../../models/Faculty');
 const HODFacultyAllocation = require('../../models/HODFacultyAllocation');
 const FacultyAvailability = require('../../models/FacultyAvailability');
 const { DEFAULT_DAYS, DEFAULT_PERIODS } = require('./timetableGrid');
+const { resolveSemesterForContext } = require('./semesterResolver');
+const { R22_ELECTIVE_SLOT_MAP } = require('../../data/r22CurriculumMaster');
 
 const YEAR_TO_SEMESTER = {
   'I YEAR': 'Semester I',
@@ -66,13 +68,12 @@ async function buildSchedulingContext(input = {}) {
     );
   }
 
-  const ctxYearUpper = (context.year || '').toUpperCase().trim();
-  const expectedSemester = YEAR_TO_SEMESTER[ctxYearUpper];
+  const expectedSemester = resolveSemesterForContext(context);
   if (!expectedSemester) {
     throw new ConstraintBuilderError(
-      `Unknown cohort year '${context.year}'. Cannot map to curriculum semester.`,
+      `Cannot map cohort '${context.year}' (${context.semester}) to an authoritative curriculum semester.`,
       'INVALID_COHORT_YEAR',
-      { year: context.year }
+      { year: context.year, semester: context.semester }
     );
   }
 
@@ -143,6 +144,27 @@ async function buildSchedulingContext(input = {}) {
             { courseCode: normalizedCode, expectedSemester, actualSemester: course.semester }
           );
         }
+      } else if (
+        ['PEC', 'OEC', 'Management Elective'].includes(course.electiveType) ||
+        ['PEC', 'OEC'].includes(course.category)
+      ) {
+        // Validate elective slot applicability for target semester
+        const slotsForSem = R22_ELECTIVE_SLOT_MAP[expectedSemester] || [];
+        const allowsPEC = slotsForSem.some((s) => s.allowedType.includes('PEC'));
+        const allowsOEC = slotsForSem.some((s) => s.allowedType.includes('OEC'));
+        const allowsMgmt = slotsForSem.some((s) => s.allowedType.includes('Management'));
+
+        const isPEC = course.electiveType === 'PEC' || course.category === 'PEC';
+        const isOEC = course.electiveType === 'OEC' || course.category === 'OEC';
+        const isMgmt = course.electiveType === 'Management Elective';
+
+        if ((isPEC && !allowsPEC) || (isOEC && !allowsOEC) || (isMgmt && !allowsMgmt)) {
+          throw new ConstraintBuilderError(
+            `Elective '${normalizedCode}' (${course.electiveType || course.category}) is not permitted in ${expectedSemester}.`,
+            'COURSE_SEMESTER_MISMATCH',
+            { courseCode: normalizedCode, expectedSemester, electiveType: course.electiveType }
+          );
+        }
       }
 
       coursesToSchedule.push({
@@ -157,6 +179,7 @@ async function buildSchedulingContext(input = {}) {
     const semCourses = await Course.find({
       semester: expectedSemester,
       isActive: true,
+      category: { $nin: ['PEC', 'OEC'] },
     }).sort({ courseCode: 1 });
 
     if (semCourses.length === 0) {
@@ -173,6 +196,40 @@ async function buildSchedulingContext(input = {}) {
       requestedPeriods: null,
       requestedType: null,
     }));
+
+    // Check if semester requires electives
+    const electiveSlots = R22_ELECTIVE_SLOT_MAP[expectedSemester] || [];
+    if (electiveSlots.length > 0) {
+      const existingAllocs = await HODFacultyAllocation.find({
+        academicContextId: context._id,
+        status: { $ne: 'REJECTED' },
+      });
+
+      const coreCodes = new Set(semCourses.map((c) => c.courseCode));
+      const allocatedElectiveCodes = existingAllocs
+        .map((a) => a.courseCode)
+        .filter((code) => !coreCodes.has(code));
+
+      if (allocatedElectiveCodes.length < electiveSlots.length) {
+        throw new ConstraintBuilderError(
+          `Cohort requires ${electiveSlots.length} active elective allocation(s), but only ${allocatedElectiveCodes.length} allocated. Elective selection required prior to generation.`,
+          'ELECTIVE_SELECTION_REQUIRED',
+          { expectedSemester, requiredSlots: electiveSlots.map((s) => s.slot), allocatedCount: allocatedElectiveCodes.length }
+        );
+      }
+
+      for (const electiveCode of allocatedElectiveCodes) {
+        const electiveCourse = await Course.findOne({ courseCode: electiveCode });
+        if (electiveCourse) {
+          coursesToSchedule.push({
+            course: electiveCourse,
+            requestedFacultyId: null,
+            requestedPeriods: null,
+            requestedType: null,
+          });
+        }
+      }
+    }
   }
 
   // 4. Resolve Authoritative HOD Faculty Allocations

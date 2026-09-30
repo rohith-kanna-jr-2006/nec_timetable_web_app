@@ -1,4 +1,4 @@
-﻿# Nandha Engineering College (NEC) — Faculty Timetable & Workload System (Web + Backend)
+# Nandha Engineering College (NEC) — Faculty Timetable & Workload System (Web + Backend)
 
 [![CI Status](https://github.com/rohith-kanna-jr-2006/nec-faculty-timetable/actions/workflows/ci.yml/badge.svg)](https://github.com/rohith-kanna-jr-2006/nec-faculty-timetable/actions/workflows/ci.yml)
 [![React](https://img.shields.io/badge/React-18.3.1-blue.svg?logo=react)](https://react.dev)
@@ -12,9 +12,50 @@ This repository contains the standalone desktop-first Web application and the pr
 
 ---
 
+## Commands to Run
+
+### Database (MongoDB)
+Ensure MongoDB is running locally on port `27017`:
+```bash
+# Windows
+net start MongoDB
+```
+
+### Backend API
+Runs on **http://localhost:5000** (Health check: `http://localhost:5000/api/health`):
+```bash
+cd backend
+npm run dev
+```
+*(Alternative for production)*:
+```bash
+cd backend
+npm start
+```
+
+### Frontend Web App
+Runs on **http://localhost:3002** (proxies `/api` to `http://localhost:5000`):
+```bash
+cd web
+npm run dev
+```
+*(Alternative)*:
+```bash
+cd web
+npm start
+```
+
+### Unified Full-Stack Server (Root)
+Builds and serves both the API and frontend SPA:
+```bash
+npm run dev
+```
+
+---
+
 ## Architecture & Project Structure
 
-`
+```text
 NEC Timetable Web App/
 ├── web/                           # Desktop-first MERN React Web Application (Rohith)
 │   ├── public/                    # Static assets & HTML template
@@ -64,50 +105,34 @@ NEC Timetable Web App/
 ├── CONTRIBUTING.md                # Contribution guidelines
 ├── CODE_OF_CONDUCT.md             # Code of conduct
 └── SECURITY.md                    # Security policy
-`
+```
 
 ---
 
 ## Roles & Ownership
 
-- **Rohith**: Web Frontend (web/) — React, UI/UX, pages, layouts, styles, components, frontend API integration.
-- **Ragul**: Backend (ackend/) — Node.js, Express, MongoDB, Mongoose, APIs, RBAC, workload logic, seeds/migrations, Docker, Playwright/E2E testing.
+- **Rohith**: Web Frontend (`web/`) — React, UI/UX, pages, layouts, styles, components, frontend API integration.
+- **Ragul**: Backend (`backend/`) — Node.js, Express, MongoDB, Mongoose, APIs, RBAC, workload logic, seeds/migrations, Docker, Playwright/E2E testing.
 
 ---
 
-## Quick Start
+## Testing & Build Commands
 
-### 1. Backend Setup
-`ash
+### Backend Testing & Seeding
+```bash
 cd backend
-npm install
 npm run seed     # Populate database with master curriculum and faculty data
-npm start        # Starts server on http://localhost:5000
-`
+npm test         # Run all backend test suites
+```
 
-To run backend tests:
-`ash
-npm test
-`
-
-### 2. Web Frontend Setup
-`ash
+### Frontend Build & Testing
+```bash
 cd web
-npm install
-npm start        # Starts webpack dev server on http://localhost:3002
-`
+npm run build    # Production webpack build to web/dist
+npm test         # Run frontend test suites
+```
 
-To build production bundle:
-`ash
-npm run build
-`
-
-To run web test suites:
-`ash
-npm test
-`
-
-### 3. Docker Compose
-`ash
+### Docker Compose
+```bash
 docker compose up -d
-`
+```

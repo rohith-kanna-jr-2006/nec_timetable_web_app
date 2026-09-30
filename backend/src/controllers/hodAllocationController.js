@@ -3,6 +3,8 @@ const AcademicContext = require('../models/AcademicContext');
 const Course = require('../models/Course');
 const Faculty = require('../models/Faculty');
 const { updateAllocationStatus } = require('../services/allocationService');
+const { resolveSemesterForContext } = require('../services/timetable/semesterResolver');
+const { R22_ELECTIVE_SLOT_MAP } = require('../data/r22CurriculumMaster');
 const { successResponse, errorResponse } = require('../utils/responseHandler');
 
 /**
@@ -39,21 +41,6 @@ async function getAllocations(req, res, next) {
     next(error);
   }
 }
-// Roman normalization & semester mapping
-const YEAR_TO_SEMESTER_MAP = {
-  'I YEAR': 'Semester I', '1': 'Semester I', 'I': 'Semester I',
-  'II YEAR': 'Semester III', '2': 'Semester III', 'II': 'Semester III',
-  'III YEAR': 'Semester V', '3': 'Semester V', 'III': 'Semester V',
-  'IV YEAR': 'Semester VII', '4': 'Semester VII', 'IV': 'Semester VII',
-};
-
-const YEAR_TO_SEMESTER_EVEN_MAP = {
-  'I YEAR': 'Semester II', '1': 'Semester II', 'I': 'Semester II',
-  'II YEAR': 'Semester IV', '2': 'Semester IV', 'II': 'Semester IV',
-  'III YEAR': 'Semester VI', '3': 'Semester VI', 'III': 'Semester VI',
-  'IV YEAR': 'Semester VIII', '4': 'Semester VIII', 'IV': 'Semester VIII',
-};
-
 /**
  * Validate all course allocations for an academic cohort/context
  * GET /api/hod-allocations/validate/:academicContextId
@@ -67,10 +54,10 @@ async function validateCohortAllocations(req, res, next) {
       return errorResponse(res, 'Academic context not found', 404, 'NOT_FOUND');
     }
 
-    const isEven = /even/i.test(context.semester);
-    const mapToUse = isEven ? YEAR_TO_SEMESTER_EVEN_MAP : YEAR_TO_SEMESTER_MAP;
-    const ctxYearUpper = (context.year || '').toUpperCase().trim();
-    const expectedSemester = mapToUse[ctxYearUpper];
+    const expectedSemester = resolveSemesterForContext(context);
+    if (!expectedSemester) {
+      return errorResponse(res, `Cannot map cohort '${context.year}' (${context.semester}) to an official curriculum semester`, 400, 'INVALID_COHORT_YEAR');
+    }
 
     // Find curriculum courses for this cohort
     const curriculumCourses = await Course.find({
@@ -184,16 +171,35 @@ async function createAllocation(req, res, next) {
     }
 
     // Verify course semester matches academic context cohort
-    const isEven = /even/i.test(context.semester);
-    const mapToUse = isEven ? YEAR_TO_SEMESTER_EVEN_MAP : YEAR_TO_SEMESTER_MAP;
-    const ctxYearUpper = (context.year || '').toUpperCase().trim();
-    const expectedSemester = mapToUse[ctxYearUpper];
+    const expectedSemester = resolveSemesterForContext(context);
 
     if (expectedSemester && crs.semester && crs.semester.startsWith('Semester ')) {
       if (crs.semester.toUpperCase() !== expectedSemester.toUpperCase()) {
         return errorResponse(
           res,
           `Course '${normalizedCourseCode}' belongs to ${crs.semester}, but target cohort is ${context.year} (${expectedSemester}).`,
+          409,
+          'COURSE_SEMESTER_MISMATCH'
+        );
+      }
+    } else if (
+      expectedSemester &&
+      (['PEC', 'OEC', 'Management Elective'].includes(crs.electiveType) ||
+        ['PEC', 'OEC'].includes(crs.category))
+    ) {
+      const slotsForSem = R22_ELECTIVE_SLOT_MAP[expectedSemester] || [];
+      const allowsPEC = slotsForSem.some((s) => s.allowedType.includes('PEC'));
+      const allowsOEC = slotsForSem.some((s) => s.allowedType.includes('OEC'));
+      const allowsMgmt = slotsForSem.some((s) => s.allowedType.includes('Management'));
+
+      const isPEC = crs.electiveType === 'PEC' || crs.category === 'PEC';
+      const isOEC = crs.electiveType === 'OEC' || crs.category === 'OEC';
+      const isMgmt = crs.electiveType === 'Management Elective';
+
+      if ((isPEC && !allowsPEC) || (isOEC && !allowsOEC) || (isMgmt && !allowsMgmt)) {
+        return errorResponse(
+          res,
+          `Elective '${normalizedCourseCode}' (${crs.electiveType || crs.category}) is not permitted for ${context.year} (${expectedSemester}).`,
           409,
           'COURSE_SEMESTER_MISMATCH'
         );
