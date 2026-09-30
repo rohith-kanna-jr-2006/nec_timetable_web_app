@@ -1,6 +1,14 @@
-require('dotenv').config();
-const fs = require('fs');
 const path = require('path');
+try {
+  require('dotenv').config();
+} catch (e) {
+  try {
+    require(path.resolve(__dirname, 'backend/node_modules/dotenv')).config({
+      path: path.resolve(__dirname, 'backend/.env'),
+    });
+  } catch (err) {}
+}
+const fs = require('fs');
 const { execSync } = require('child_process');
 const app = require('./backend/src/app');
 const { connectDB, disconnectDB } = require('./backend/src/config/db');
