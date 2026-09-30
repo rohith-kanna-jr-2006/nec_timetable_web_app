@@ -10,6 +10,8 @@ const { validateTimetableVersion, validateTimetableSession } = require('../valid
 router.get('/faculty/:facultyId', timetableController.getFacultyTimetable);
 router.get('/class/:academicContextId', timetableController.getClassTimetable);
 router.get('/published/:academicContextId', timetableController.getPublishedClassTimetable);
+router.get('/review-matrix', timetableController.getReviewMatrix);
+router.get('/matrix', timetableController.getReviewMatrix);
 
 // Version Management
 router.get('/versions', timetableController.getVersions);

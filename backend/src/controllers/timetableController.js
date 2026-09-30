@@ -123,8 +123,139 @@ async function getClassTimetable(req, res, next) {
     const { academicContextId } = req.params;
     const { versionId } = req.query;
 
+    const context = await AcademicContext.findById(academicContextId);
+    if (!context) {
+      return errorResponse(res, 'Academic context not found', 404, 'NOT_FOUND');
+    }
+
     const sessions = await getClassSchedule(academicContextId, versionId);
-    return successResponse(res, { academicContextId, sessionCount: sessions.length, sessions });
+    return successResponse(res, {
+      academicContextId,
+      academicContext: {
+        academicYear: context.academicYear,
+        semester: context.semester,
+        department: context.department,
+        year: context.year,
+        section: context.section,
+        program: context.program,
+        status: context.status,
+      },
+      sessionCount: sessions.length,
+      sessions,
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
+/**
+ * Review Matrix API endpoint with exact context & version isolation
+ * GET /api/timetable/review-matrix
+ * GET /api/timetable/matrix
+ */
+async function getReviewMatrix(req, res, next) {
+  try {
+    const { academicContextId, timetableVersionId, versionId } = req.query;
+    const targetVersionId = timetableVersionId || versionId;
+
+    let context = null;
+    if (academicContextId) {
+      context = await AcademicContext.findById(academicContextId);
+      if (!context) {
+        return errorResponse(res, 'Academic context not found', 404, 'NOT_FOUND');
+      }
+    }
+
+    let version = null;
+    if (targetVersionId) {
+      version = await TimetableVersion.findById(targetVersionId);
+      if (!version) {
+        return errorResponse(res, 'Timetable version not found', 404, 'NOT_FOUND');
+      }
+    } else if (context) {
+      version = await TimetableVersion.findOne({
+        academicYear: context.academicYear,
+        semester: context.semester,
+        department: context.department,
+        ...(context.year ? { year: context.year } : {}),
+        ...(context.section ? { section: context.section } : {}),
+        status: 'PUBLISHED',
+      }).sort({ publishedAt: -1, createdAt: -1 });
+
+      if (!version) {
+        version = await TimetableVersion.findOne({
+          academicYear: context.academicYear,
+          semester: context.semester,
+          department: context.department,
+          ...(context.year ? { year: context.year } : {}),
+          ...(context.section ? { section: context.section } : {}),
+          status: { $in: ['APPROVED', 'PENDING_HOD_APPROVAL', 'GENERATED', 'DRAFT'] },
+        }).sort({ updatedAt: -1, createdAt: -1 });
+      }
+    } else {
+      version = await TimetableVersion.findOne({ status: 'PUBLISHED' }).sort({ publishedAt: -1, createdAt: -1 });
+    }
+
+    const sessionQuery = {};
+    if (context) {
+      sessionQuery.academicContextId = context._id;
+    }
+    if (version) {
+      sessionQuery.timetableVersionId = version._id;
+    }
+
+    const rawSessions = await TimetableSession.find(sessionQuery)
+      .sort({ day: 1, period: 1 })
+      .lean();
+
+    // Populate and ensure canonical Course & Faculty metadata
+    const sessions = await Promise.all(
+      rawSessions.map(async (s) => {
+        let canonicalCourseName = s.courseName;
+        if (s.courseCode) {
+          const crs = await Course.findOne({ courseCode: s.courseCode });
+          if (crs) canonicalCourseName = crs.courseName;
+        }
+        return {
+          ...s,
+          courseName: canonicalCourseName,
+          academicContextId: s.academicContextId ? s.academicContextId.toString() : null,
+          timetableVersionId: s.timetableVersionId ? s.timetableVersionId.toString() : null,
+        };
+      })
+    );
+
+    return successResponse(res, {
+      academicContextId: context ? context._id : null,
+      academicContext: context
+        ? {
+            id: context._id,
+            academicYear: context.academicYear,
+            semester: context.semester,
+            department: context.department,
+            year: context.year,
+            section: context.section,
+            program: context.program,
+            status: context.status,
+          }
+        : null,
+      timetableVersionId: version ? version._id : null,
+      timetableVersion: version
+        ? {
+            id: version._id,
+            version: version.version,
+            versionLabel: version.versionLabel,
+            status: version.status,
+            academicYear: version.academicYear,
+            semester: version.semester,
+            department: version.department,
+            year: version.year,
+            section: version.section,
+          }
+        : null,
+      sessionCount: sessions.length,
+      sessions,
+    });
   } catch (error) {
     next(error);
   }
@@ -366,7 +497,7 @@ async function createSession(req, res, next) {
       timetableVersionId: finalVersionId,
       academicContextId: finalContextId,
       courseCode: normalizedCourseCode,
-      courseName: courseName || course.courseName || '',
+      courseName: course.courseName || courseName || '',
       facultyId: submittedFacultyId,
       facultyName: resolvedFacultyName || '',
       day,
@@ -468,6 +599,7 @@ module.exports = {
   getFacultyTimetable,
   getClassTimetable,
   getPublishedClassTimetable,
+  getReviewMatrix,
   createSession,
   deleteSession,
   solveTimetable,

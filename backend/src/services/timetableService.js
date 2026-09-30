@@ -1,5 +1,6 @@
 const TimetableVersion = require('../models/TimetableVersion');
 const TimetableSession = require('../models/TimetableSession');
+const AcademicContext = require('../models/AcademicContext');
 const { buildSchedulingContext } = require('./timetable/constraintBuilder');
 const { solveTimetable } = require('./timetable/timetableSolver');
 
@@ -125,23 +126,65 @@ async function solveAndPersistTimetable(input, user = {}) {
 
 /**
  * Retrieves timetable sessions for a faculty member.
- * Strictly uses TimetableSession collection.
+ * Strictly uses TimetableSession collection and isolates active version.
  */
 async function getFacultySchedule(facultyId, versionId = null) {
   const filter = { facultyId };
   if (versionId) {
     filter.timetableVersionId = versionId;
+  } else {
+    // Isolate published versions to prevent historical session leakage
+    const publishedVersions = await TimetableVersion.find({ status: 'PUBLISHED' });
+    if (publishedVersions.length > 0) {
+      filter.timetableVersionId = { $in: publishedVersions.map((v) => v._id) };
+    } else {
+      const activeVersions = await TimetableVersion.find({
+        status: { $in: ['APPROVED', 'PENDING_HOD_APPROVAL', 'GENERATED'] },
+      }).sort({ updatedAt: -1 }).limit(10);
+      if (activeVersions.length > 0) {
+        filter.timetableVersionId = { $in: activeVersions.map((v) => v._id) };
+      }
+    }
   }
   return TimetableSession.find(filter).sort({ day: 1, period: 1 });
 }
 
 /**
  * Retrieves timetable sessions for an academic context (class).
+ * Strictly enforces context and version isolation.
  */
 async function getClassSchedule(academicContextId, versionId = null) {
   const filter = { academicContextId };
   if (versionId) {
     filter.timetableVersionId = versionId;
+  } else {
+    // Resolve single authoritative version for this context
+    const context = await AcademicContext.findById(academicContextId);
+    if (context) {
+      let version = await TimetableVersion.findOne({
+        academicYear: context.academicYear,
+        semester: context.semester,
+        department: context.department,
+        ...(context.year ? { year: context.year } : {}),
+        ...(context.section ? { section: context.section } : {}),
+        status: 'PUBLISHED',
+      }).sort({ publishedAt: -1, createdAt: -1 });
+
+      if (!version) {
+        version = await TimetableVersion.findOne({
+          academicYear: context.academicYear,
+          semester: context.semester,
+          department: context.department,
+          ...(context.year ? { year: context.year } : {}),
+          ...(context.section ? { section: context.section } : {}),
+          status: { $in: ['APPROVED', 'PENDING_HOD_APPROVAL', 'GENERATED', 'DRAFT'] },
+        }).sort({ updatedAt: -1, createdAt: -1 });
+      }
+
+      if (version) {
+        filter.timetableVersionId = version._id;
+      }
+    }
   }
   return TimetableSession.find(filter).sort({ day: 1, period: 1 });
 }

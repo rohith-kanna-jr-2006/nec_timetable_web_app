@@ -7,6 +7,7 @@ const { validate } = require('../middleware/validateMiddleware');
 const { validateHodAllocation } = require('../validators/allocationValidators');
 
 router.get('/', hodAllocationController.getAllocations);
+router.get('/validate/:academicContextId', hodAllocationController.validateCohortAllocations);
 router.post(
   '/',
   authenticateUser,

@@ -1,4 +1,5 @@
 const HODFacultyAllocation = require('../models/HODFacultyAllocation');
+const AcademicContext = require('../models/AcademicContext');
 const Course = require('../models/Course');
 const Faculty = require('../models/Faculty');
 const { updateAllocationStatus } = require('../services/allocationService');
@@ -38,6 +39,124 @@ async function getAllocations(req, res, next) {
     next(error);
   }
 }
+// Roman normalization & semester mapping
+const YEAR_TO_SEMESTER_MAP = {
+  'I YEAR': 'Semester I', '1': 'Semester I', 'I': 'Semester I',
+  'II YEAR': 'Semester III', '2': 'Semester III', 'II': 'Semester III',
+  'III YEAR': 'Semester V', '3': 'Semester V', 'III': 'Semester V',
+  'IV YEAR': 'Semester VII', '4': 'Semester VII', 'IV': 'Semester VII',
+};
+
+const YEAR_TO_SEMESTER_EVEN_MAP = {
+  'I YEAR': 'Semester II', '1': 'Semester II', 'I': 'Semester II',
+  'II YEAR': 'Semester IV', '2': 'Semester IV', 'II': 'Semester IV',
+  'III YEAR': 'Semester VI', '3': 'Semester VI', 'III': 'Semester VI',
+  'IV YEAR': 'Semester VIII', '4': 'Semester VIII', 'IV': 'Semester VIII',
+};
+
+/**
+ * Validate all course allocations for an academic cohort/context
+ * GET /api/hod-allocations/validate/:academicContextId
+ */
+async function validateCohortAllocations(req, res, next) {
+  try {
+    const { academicContextId } = req.params;
+
+    const context = await AcademicContext.findById(academicContextId);
+    if (!context) {
+      return errorResponse(res, 'Academic context not found', 404, 'NOT_FOUND');
+    }
+
+    const isEven = /even/i.test(context.semester);
+    const mapToUse = isEven ? YEAR_TO_SEMESTER_EVEN_MAP : YEAR_TO_SEMESTER_MAP;
+    const ctxYearUpper = (context.year || '').toUpperCase().trim();
+    const expectedSemester = mapToUse[ctxYearUpper];
+
+    // Find curriculum courses for this cohort
+    const curriculumCourses = await Course.find({
+      semester: expectedSemester,
+      isActive: true,
+      category: { $nin: ['PEC', 'OEC'] }, // Standard core requirements
+    }).sort({ courseCode: 1 });
+
+    const allocations = await HODFacultyAllocation.find({
+      academicContextId: context._id,
+      status: { $ne: 'REJECTED' },
+    });
+
+    const allocByCourse = new Map();
+    for (const alloc of allocations) {
+      if (!allocByCourse.has(alloc.courseCode)) {
+        allocByCourse.set(alloc.courseCode, []);
+      }
+      allocByCourse.get(alloc.courseCode).push(alloc);
+    }
+
+    const validationResults = [];
+    let allValid = true;
+
+    for (const course of curriculumCourses) {
+      const courseAllocs = allocByCourse.get(course.courseCode) || [];
+      if (courseAllocs.length === 0) {
+        allValid = false;
+        validationResults.push({
+          courseCode: course.courseCode,
+          courseName: course.courseName,
+          status: 'UNRESOLVED',
+          error: `Missing HOD faculty allocation for course ${course.courseCode}`,
+        });
+      } else if (courseAllocs.length > 1) {
+        allValid = false;
+        validationResults.push({
+          courseCode: course.courseCode,
+          courseName: course.courseName,
+          status: 'CONFLICT',
+          error: `Multiple allocations found (${courseAllocs.length}) for course ${course.courseCode}`,
+          allocations: courseAllocs,
+        });
+      } else {
+        const alloc = courseAllocs[0];
+        const faculty = await Faculty.findOne({ facultyId: alloc.facultyId });
+        if (!faculty) {
+          allValid = false;
+          validationResults.push({
+            courseCode: course.courseCode,
+            courseName: course.courseName,
+            status: 'INVALID_FACULTY',
+            error: `Allocated faculty ID '${alloc.facultyId}' not found`,
+          });
+        } else if (!faculty.isActive) {
+          allValid = false;
+          validationResults.push({
+            courseCode: course.courseCode,
+            courseName: course.courseName,
+            status: 'INACTIVE_FACULTY',
+            error: `Allocated faculty '${faculty.facultyName}' is inactive`,
+          });
+        } else {
+          validationResults.push({
+            courseCode: course.courseCode,
+            courseName: course.courseName,
+            facultyId: faculty.facultyId,
+            facultyName: faculty.facultyName,
+            status: 'VALID',
+          });
+        }
+      }
+    }
+
+    return successResponse(res, {
+      academicContextId: context._id,
+      cohort: `${context.year} Sec ${context.section} (${expectedSemester})`,
+      readyForGeneration: allValid,
+      totalRequiredCourses: curriculumCourses.length,
+      allocatedCount: validationResults.filter((r) => r.status === 'VALID').length,
+      details: validationResults,
+    });
+  } catch (error) {
+    next(error);
+  }
+}
 
 /**
  * Create an allocation (draft or submitted)
@@ -49,7 +168,48 @@ async function createAllocation(req, res, next) {
 
     const normalizedCourseCode = courseCode.toUpperCase().trim();
 
-    // Check if an active authoritative allocation already exists for this context + course
+    // 1. Verify academic context exists and is active
+    const context = await AcademicContext.findById(academicContextId);
+    if (!context) {
+      return errorResponse(res, `Academic context '${academicContextId}' not found`, 404, 'NOT_FOUND');
+    }
+    if (context.status !== 'ACTIVE') {
+      return errorResponse(res, `Academic context '${academicContextId}' is not active`, 400, 'CONTEXT_INACTIVE');
+    }
+
+    // 2. Verify course exists
+    const crs = await Course.findOne({ courseCode: normalizedCourseCode });
+    if (!crs) {
+      return errorResponse(res, `Course '${normalizedCourseCode}' not found in Course Master`, 404, 'COURSE_NOT_FOUND');
+    }
+
+    // Verify course semester matches academic context cohort
+    const isEven = /even/i.test(context.semester);
+    const mapToUse = isEven ? YEAR_TO_SEMESTER_EVEN_MAP : YEAR_TO_SEMESTER_MAP;
+    const ctxYearUpper = (context.year || '').toUpperCase().trim();
+    const expectedSemester = mapToUse[ctxYearUpper];
+
+    if (expectedSemester && crs.semester && crs.semester.startsWith('Semester ')) {
+      if (crs.semester.toUpperCase() !== expectedSemester.toUpperCase()) {
+        return errorResponse(
+          res,
+          `Course '${normalizedCourseCode}' belongs to ${crs.semester}, but target cohort is ${context.year} (${expectedSemester}).`,
+          409,
+          'COURSE_SEMESTER_MISMATCH'
+        );
+      }
+    }
+
+    // 3. Verify faculty exists and is active
+    const fac = await Faculty.findOne({ facultyId: facultyId.trim() });
+    if (!fac) {
+      return errorResponse(res, `Faculty '${facultyId}' not found in Faculty database`, 404, 'FACULTY_NOT_FOUND');
+    }
+    if (fac.isActive === false) {
+      return errorResponse(res, `Faculty '${fac.facultyName}' (${facultyId}) is marked inactive`, 409, 'FACULTY_INACTIVE');
+    }
+
+    // 4. Check if an active authoritative allocation already exists for this context + course
     const existing = await HODFacultyAllocation.findOne({
       academicContextId,
       courseCode: normalizedCourseCode,
@@ -78,27 +238,13 @@ async function createAllocation(req, res, next) {
       );
     }
 
-    // Auto-resolve courseName if missing
-    let resolvedCourseName = courseName;
-    if (!resolvedCourseName) {
-      const crs = await Course.findOne({ courseCode: normalizedCourseCode });
-      if (crs) resolvedCourseName = crs.courseName;
-    }
-
-    // Auto-resolve facultyName if missing
-    let resolvedFacultyName = facultyName;
-    if (!resolvedFacultyName) {
-      const fac = await Faculty.findOne({ facultyId });
-      if (fac) resolvedFacultyName = fac.facultyName;
-    }
-
     const allocation = await HODFacultyAllocation.create({
       academicContextId,
       courseCode: normalizedCourseCode,
-      courseName: resolvedCourseName || '',
-      facultyId,
-      facultyName: resolvedFacultyName || '',
-      allocationType: allocationType || 'THEORY',
+      courseName: crs.courseName, // Always enforce canonical courseName from Course Master
+      facultyId: fac.facultyId,
+      facultyName: fac.facultyName,
+      allocationType: allocationType || (crs.isLab ? 'LAB_PRIMARY' : 'THEORY'),
       assignedBy: req.user ? req.user.name || req.user.email : 'HOD',
       status: initialStatus,
     });
@@ -191,8 +337,10 @@ async function deleteAllocation(req, res, next) {
 
 module.exports = {
   getAllocations,
+  validateCohortAllocations,
   createAllocation,
   updateAllocation,
   updateStatus,
   deleteAllocation,
 };
+

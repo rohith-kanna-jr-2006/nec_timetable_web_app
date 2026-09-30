@@ -68,6 +68,21 @@ async function migrateDependentReferences() {
     { courseCode: '22CSC15' },
     { $set: { courseName: 'Full Stack Development' } }
   );
+
+  // 3. Migrate HODFacultyAllocation titles
+  const HODFacultyAllocation = require('../models/HODFacultyAllocation');
+  await HODFacultyAllocation.updateMany(
+    { courseCode: '22CSX42' },
+    { $set: { courseName: 'UI and UX Design' } }
+  );
+  await HODFacultyAllocation.updateMany(
+    { courseCode: '22CSX21' },
+    { $set: { courseName: 'Fundamentals of Cryptography and Network Security' } }
+  );
+  await HODFacultyAllocation.updateMany(
+    { courseCode: '22CSC15' },
+    { $set: { courseName: 'Full Stack Development' } }
+  );
 }
 
 /**

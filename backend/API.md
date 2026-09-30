@@ -506,9 +506,35 @@ Update candidate handlers.
 List final ratified allocations.
 - **Query Params**: `academicContextId`, `facultyId`, `courseCode`, `status`
 
+### `GET /api/hod-allocations/validate/:academicContextId`
+Validate all curriculum core course allocations for a cohort prior to timetable generation.
+- **Response**:
+  ```json
+  {
+    "success": true,
+    "data": {
+      "academicContextId": "66f7...",
+      "cohort": "III Year Sec A (Semester V)",
+      "readyForGeneration": true,
+      "totalRequiredCourses": 6,
+      "allocatedCount": 6,
+      "details": [
+        {
+          "courseCode": "22CSC14",
+          "courseName": "Theory of Computation",
+          "facultyId": "FWL-04",
+          "facultyName": "Dr. S. Karthik",
+          "status": "VALID"
+        }
+      ]
+    }
+  }
+  ```
+
 ### `POST /api/hod-allocations`
 Create draft or submitted allocation.
-- **Access**: AC (drafts only), HOD (can create directly as approved)
+- **Access**: HOD, ADMIN
+- Enforces course existence, active context check, course semester matching cohort, and active faculty verification.
 
 ### `PATCH /api/hod-allocations/:id/status`
 Approve or reject allocation.
@@ -521,13 +547,20 @@ Approve or reject allocation.
 
 ### `GET /api/timetable/faculty/:facultyId`
 Get scheduled sessions for a faculty member.
-- **Query Params**: `versionId` (optional)
+- **Query Params**: `versionId` (optional; defaults to published or latest active version, preventing historical leakage)
 
 ### `GET /api/timetable/class/:academicContextId`
 Get class timetable grid.
+- **Query Params**: `versionId` (optional; defaults to published or active version for the class)
 
 ### `GET /api/timetable/published/:academicContextId`
 Get current published timetable for a class.
+
+### `GET /api/timetable/review-matrix`
+Review Matrix endpoint with exact academic context and timetable version isolation.
+- **Aliases**: `GET /api/timetable/matrix`
+- **Query Params**: `academicContextId`, `timetableVersionId` / `versionId`
+- **Response**: Structured payload containing `academicContext`, `timetableVersion`, `sessionCount`, and `sessions` list with canonical `courseName` from Course Master.
 
 ### `GET /api/timetable/versions`
 List timetable versions.
