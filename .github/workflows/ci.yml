@@ -1,4 +1,4 @@
-﻿name: CI
+name: CI
 
 on:
   push:
@@ -21,11 +21,12 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: 'npm'
-          cache-dependency-path: web/package-lock.json
 
       - name: Install Web Dependencies
-        run: npm ci || npm install
+        run: npm install
+
+      - name: Run Web Test Suite
+        run: npm test
 
       - name: Build Web Application
         run: npm run build
@@ -51,11 +52,9 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: 'npm'
-          cache-dependency-path: backend/package-lock.json
 
       - name: Install Backend Dependencies
-        run: npm ci || npm install
+        run: npm install
 
       - name: Populate Seed Database
         run: npm run seed
@@ -70,3 +69,4 @@ jobs:
           MONGODB_URI: mongodb://127.0.0.1:27017/nec_faculty_db
           JWT_SECRET: ci_test_secret_key_12345
           NODE_ENV: test
+
