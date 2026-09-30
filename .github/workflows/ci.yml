@@ -30,6 +30,8 @@ jobs:
 
       - name: Build Web Application
         run: npm run build
+        env:
+          NODE_OPTIONS: "--max-old-space-size=4096"
 
   backend:
     name: Backend API & Integration Tests
