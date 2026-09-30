@@ -8,6 +8,13 @@ const { validateHodAllocation } = require('../validators/allocationValidators');
 
 router.get('/', hodAllocationController.getAllocations);
 router.get('/validate/:academicContextId', hodAllocationController.validateCohortAllocations);
+router.get('/context/:academicContextId', hodAllocationController.getAllocationContext);
+router.put(
+  '/context/:academicContextId/course/:courseCode',
+  authenticateUser,
+  requireRole('HOD', 'ADMIN'),
+  hodAllocationController.saveCourseAllocation
+);
 router.post(
   '/',
   authenticateUser,
@@ -20,3 +27,4 @@ router.put('/:id', authenticateUser, requireRole('HOD', 'ADMIN'), hodAllocationC
 router.delete('/:id', authenticateUser, requireRole('HOD', 'ADMIN'), hodAllocationController.deleteAllocation);
 
 module.exports = router;
+

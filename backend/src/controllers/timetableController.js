@@ -498,7 +498,23 @@ async function createSession(req, res, next) {
     const authoritativeAllocation = hodAllocs[0];
     const submittedFacultyId = facultyId.trim();
 
-    if (authoritativeAllocation.facultyId !== submittedFacultyId) {
+    const assignments =
+      authoritativeAllocation.facultyAssignments && authoritativeAllocation.facultyAssignments.length > 0
+        ? authoritativeAllocation.facultyAssignments
+        : [
+            {
+              facultyId: authoritativeAllocation.facultyId || submittedFacultyId,
+              facultyName: authoritativeAllocation.facultyName || facultyName || '',
+              role: 'PRIMARY',
+            },
+          ];
+
+    const allowedFacultyIds = assignments.map((a) => a.facultyId).filter(Boolean);
+    if (authoritativeAllocation.facultyId && !allowedFacultyIds.includes(authoritativeAllocation.facultyId)) {
+      allowedFacultyIds.push(authoritativeAllocation.facultyId);
+    }
+
+    if (!allowedFacultyIds.includes(submittedFacultyId)) {
       return errorResponse(
         res,
         `Submitted faculty '${submittedFacultyId}' does not match authoritative HOD allocated faculty '${authoritativeAllocation.facultyId}' for course '${normalizedCourseCode}'.`,
@@ -536,20 +552,27 @@ async function createSession(req, res, next) {
     }
 
     // 6. Check Faculty Slot Conflict (same faculty at same day + period across version)
-    const facultyConflict = await TimetableSession.findOne({
-      timetableVersionId: finalVersionId,
-      facultyId: submittedFacultyId,
-      day,
-      period,
-    });
+    const facultyIdsToCheck = assignments.map((a) => a.facultyId).filter(Boolean);
+    if (!facultyIdsToCheck.includes(submittedFacultyId)) {
+      facultyIdsToCheck.push(submittedFacultyId);
+    }
 
-    if (facultyConflict) {
-      return errorResponse(
-        res,
-        `Faculty '${submittedFacultyId}' is already scheduled on ${day} during ${period}.`,
-        409,
-        'FACULTY_TIME_CONFLICT'
-      );
+    for (const fid of facultyIdsToCheck) {
+      const facultyConflict = await TimetableSession.findOne({
+        timetableVersionId: finalVersionId,
+        $or: [{ facultyId: fid }, { 'facultyAssignments.facultyId': fid }],
+        day,
+        period,
+      });
+
+      if (facultyConflict) {
+        return errorResponse(
+          res,
+          `Faculty '${fid}' is already scheduled on ${day} during ${period}.`,
+          409,
+          'FACULTY_TIME_CONFLICT'
+        );
+      }
     }
 
     // Auto-resolve facultyName and courseName if missing
@@ -566,6 +589,7 @@ async function createSession(req, res, next) {
       courseName: course.courseName || courseName || '',
       facultyId: submittedFacultyId,
       facultyName: resolvedFacultyName || '',
+      facultyAssignments: assignments,
       day,
       period,
       room: room || null,

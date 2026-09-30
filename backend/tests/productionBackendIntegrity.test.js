@@ -414,7 +414,9 @@ async function runIntegrityTests() {
     });
     assert(facScheduleRes.statusCode === 200, 'GET /api/timetable/faculty/:facultyId returns HTTP 200');
     const facSessions = facScheduleRes.body.data.sessions || [];
-    const foreignFacultySessions = facSessions.filter(s => s.facultyId !== 'FWL-04');
+    const foreignFacultySessions = facSessions.filter(
+      (s) => s.facultyId !== 'FWL-04' && !(s.facultyAssignments && s.facultyAssignments.some((a) => a.facultyId === 'FWL-04'))
+    );
     assert(foreignFacultySessions.length === 0, 'Faculty schedule contains strictly sessions belonging to requested facultyId');
 
     // ============================================================

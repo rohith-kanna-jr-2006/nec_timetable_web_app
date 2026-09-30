@@ -18,6 +18,11 @@ function errorResponse(res, message = 'Internal server error', statusCode = 500,
     success: false,
     message,
     code,
+    error: {
+      code,
+      message,
+      ...(details ? { details } : {}),
+    },
   };
   if (details) {
     response.details = details;

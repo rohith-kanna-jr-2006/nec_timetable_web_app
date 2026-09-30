@@ -79,6 +79,11 @@ function generateLabCandidates(variable, state, context) {
   const remainingLabsCount = totalLabsCount - scheduledLabs.length;
   const mustBeAfternoon = totalLabsCount > 1 && afternoonLabsScheduled === 0 && remainingLabsCount === 1;
 
+  const assignedFacultyIds =
+    Array.isArray(variable.facultyAssignments) && variable.facultyAssignments.length > 0
+      ? variable.facultyAssignments.map((a) => a.facultyId)
+      : [variable.facultyId].filter(Boolean);
+
   for (const day of days) {
     const validBlocks = getValidLabBlocksForDay(day, duration, periods);
 
@@ -93,7 +98,6 @@ function generateLabCandidates(variable, state, context) {
 
       for (const p of block.periods) {
         const classSlotKey = `${day}_${p}`;
-        const facultySlotKey = `${variable.facultyId}_${day}_${p}`;
 
         // 1. Class conflict
         if (classOccupancy.has(classSlotKey)) {
@@ -101,15 +105,16 @@ function generateLabCandidates(variable, state, context) {
           break;
         }
 
-        // 2. Global faculty conflict
-        if (globalFacultyOccupancy.has(facultySlotKey)) {
-          blockValid = false;
-          break;
+        // 2 & 3. Global faculty conflict & availability for ALL assigned faculty
+        for (const fid of assignedFacultyIds) {
+          const facultySlotKey = `${fid}_${day}_${p}`;
+          if (globalFacultyOccupancy.has(facultySlotKey) || facultyUnavailableSet.has(facultySlotKey)) {
+            blockValid = false;
+            break;
+          }
         }
 
-        // 3. Faculty availability
-        if (facultyUnavailableSet.has(facultySlotKey)) {
-          blockValid = false;
+        if (!blockValid) {
           break;
         }
       }
@@ -123,7 +128,11 @@ function generateLabCandidates(variable, state, context) {
           isLab: true,
           variableId: variable.id,
           courseCode: variable.courseCode,
+          courseName: variable.courseName,
           facultyId: variable.facultyId,
+          facultyName: variable.facultyName,
+          facultyAssignments: variable.facultyAssignments,
+          room: variable.room,
         });
       }
     }
@@ -141,6 +150,10 @@ function generateTheoryCandidates(variable, state, context) {
   const { classOccupancy, globalFacultyOccupancy, facultyUnavailableSet } = state;
 
   const candidates = [];
+  const assignedFacultyIds =
+    Array.isArray(variable.facultyAssignments) && variable.facultyAssignments.length > 0
+      ? variable.facultyAssignments.map((a) => a.facultyId)
+      : [variable.facultyId].filter(Boolean);
 
   for (const day of days) {
     // Session concentration safeguard: if course already has >= 2 periods on this day, avoid 3rd
@@ -151,20 +164,23 @@ function generateTheoryCandidates(variable, state, context) {
 
     for (const period of periods) {
       const classSlotKey = `${day}_${period}`;
-      const facultySlotKey = `${variable.facultyId}_${day}_${period}`;
 
       // 1. Class conflict
       if (classOccupancy.has(classSlotKey)) {
         continue;
       }
 
-      // 2. Global faculty conflict
-      if (globalFacultyOccupancy.has(facultySlotKey)) {
-        continue;
+      // 2 & 3. Global faculty conflict & availability for ALL assigned faculty
+      let facultyHasConflict = false;
+      for (const fid of assignedFacultyIds) {
+        const facultySlotKey = `${fid}_${day}_${period}`;
+        if (globalFacultyOccupancy.has(facultySlotKey) || facultyUnavailableSet.has(facultySlotKey)) {
+          facultyHasConflict = true;
+          break;
+        }
       }
 
-      // 3. Faculty availability
-      if (facultyUnavailableSet.has(facultySlotKey)) {
+      if (facultyHasConflict) {
         continue;
       }
 
@@ -183,7 +199,11 @@ function generateTheoryCandidates(variable, state, context) {
         isLab: false,
         variableId: variable.id,
         courseCode: variable.courseCode,
+        courseName: variable.courseName,
         facultyId: variable.facultyId,
+        facultyName: variable.facultyName,
+        facultyAssignments: variable.facultyAssignments,
+        room: variable.room,
       });
     }
   }

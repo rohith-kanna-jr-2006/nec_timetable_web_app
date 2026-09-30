@@ -14,8 +14,10 @@ function validateHodAllocation(req) {
     errors.push('courseCode is required');
   }
 
-  if (!facultyId || typeof facultyId !== 'string' || !facultyId.trim()) {
-    errors.push('facultyId is required');
+  const hasAssignments = Array.isArray(req.body?.facultyAssignments) && req.body.facultyAssignments.length > 0;
+
+  if (!hasAssignments && (!facultyId || typeof facultyId !== 'string' || !facultyId.trim())) {
+    errors.push('facultyId or facultyAssignments is required');
   }
 
   if (allocationType && !['THEORY', 'LAB_PRIMARY', 'LAB_ADDITIONAL', 'SAS', 'OTHERS'].includes(allocationType)) {

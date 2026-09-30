@@ -38,6 +38,7 @@ router.use('/course-faculty-handlers', courseFacultyHandlerRoutes);
 router.use('/academic-contexts', academicContextRoutes);
 router.use('/class-advisors', classAdvisorRoutes);
 router.use('/hod-allocations', hodAllocationRoutes);
+router.use('/hod/faculty-allocation', hodAllocationRoutes);
 router.use('/timetable', timetableRoutes);
 router.use('/notifications', notificationRoutes);
 router.use('/availability', availabilityRoutes);

@@ -108,18 +108,30 @@ async function solveTimetable(problemSpec, options = {}) {
   function convertAssignmentsToSessions(assignmentMap) {
     const sessions = [];
     for (const [varId, cand] of assignmentMap.entries()) {
+      const facultyList =
+        Array.isArray(cand.facultyAssignments) && cand.facultyAssignments.length > 0
+          ? cand.facultyAssignments
+          : [
+              {
+                facultyId: cand.facultyId,
+                facultyName: cand.facultyName || '',
+                role: cand.isLab ? 'PRIMARY' : 'THEORY',
+              },
+            ];
+
       for (const p of cand.periods) {
         sessions.push({
           timetableVersionId: version ? version._id : null,
           academicContextId: context ? context._id : null,
           courseCode: cand.courseCode,
           courseName: cand.courseName || '',
-          facultyId: cand.facultyId,
-          facultyName: cand.facultyName || '',
+          facultyId: cand.facultyId || facultyList[0]?.facultyId,
+          facultyName: cand.facultyName || facultyList[0]?.facultyName || '',
+          facultyAssignments: facultyList,
           day: cand.day,
           period: p,
           room: cand.room || (cand.isLab ? 'Systems Lab' : 'LH-101'),
-          sessionType: cand.isLab ? 'LAB' : 'THEORY',
+          sessionType: cand.isLab ? 'LAB' : (cand.sessionType || 'THEORY'),
           duration: cand.duration || 1,
         });
       }
@@ -194,6 +206,11 @@ async function solveTimetable(problemSpec, options = {}) {
     // Rank candidates using Soft Heuristics + Least-Constraining Value (LCV) + Seeded Jitter
     const rankedCandidates = rankCandidates(rawCandidates, currentVar, state, solverContext);
 
+    const facultyList =
+      Array.isArray(currentVar.facultyAssignments) && currentVar.facultyAssignments.length > 0
+        ? currentVar.facultyAssignments
+        : [{ facultyId: currentVar.facultyId }];
+
     // Try candidates in order of score
     for (const cand of rankedCandidates) {
       // 1. Commit Assignment to State
@@ -204,11 +221,14 @@ async function solveTimetable(problemSpec, options = {}) {
           sessionType: currentVar.isLab ? 'LAB' : 'THEORY',
           variableId: currentVar.id,
         });
-        globalFacultyOccupancy.set(`${currentVar.facultyId}_${cand.day}_${p}`, {
-          academicContextId: context ? context._id : null,
-          courseCode: currentVar.courseCode,
-          sessionType: currentVar.isLab ? 'LAB' : 'THEORY',
-        });
+
+        for (const fa of facultyList) {
+          globalFacultyOccupancy.set(`${fa.facultyId}_${cand.day}_${p}`, {
+            academicContextId: context ? context._id : null,
+            courseCode: currentVar.courseCode,
+            sessionType: currentVar.isLab ? 'LAB' : 'THEORY',
+          });
+        }
       }
 
       if (currentVar.isLab) {
@@ -243,7 +263,9 @@ async function solveTimetable(problemSpec, options = {}) {
 
       for (const p of cand.periods) {
         classOccupancy.delete(`${cand.day}_${p}`);
-        globalFacultyOccupancy.delete(`${currentVar.facultyId}_${cand.day}_${p}`);
+        for (const fa of facultyList) {
+          globalFacultyOccupancy.delete(`${fa.facultyId}_${cand.day}_${p}`);
+        }
       }
     }
 

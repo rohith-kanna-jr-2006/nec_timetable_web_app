@@ -73,28 +73,37 @@ function validateGeneratedSchedule(assignments, problemSpec) {
   // 3. Check: Global faculty conflicts (across this class AND other classes)
   const facultyOccupancy = new Map();
   for (const session of assignments) {
-    const facSlotKey = `${session.facultyId}_${session.day}_${session.period}`;
+    const sessionFacultyList =
+      Array.isArray(session.facultyAssignments) && session.facultyAssignments.length > 0
+        ? session.facultyAssignments.map((a) => a.facultyId)
+        : [session.facultyId].filter(Boolean);
 
-    // Conflict within this class schedule
-    if (facultyOccupancy.has(facSlotKey)) {
-      errors.push({
-        code: 'FACULTY_TIME_CONFLICT',
-        session,
-        message: `Faculty '${session.facultyId}' is double-booked on ${session.day} ${session.period} in this timetable.`,
-      });
-    } else {
-      facultyOccupancy.set(facSlotKey, session);
-    }
+    for (const fid of sessionFacultyList) {
+      const facSlotKey = `${fid}_${session.day}_${session.period}`;
 
-    // Conflict with external class schedules
-    if (existingGlobalOccupancy.has(facSlotKey)) {
-      const ext = existingGlobalOccupancy.get(facSlotKey);
-      errors.push({
-        code: 'GLOBAL_FACULTY_CONFLICT',
-        session,
-        externalConflict: ext,
-        message: `Faculty '${session.facultyId}' is already scheduled in an external cohort on ${session.day} ${session.period}.`,
-      });
+      // Conflict within this class schedule
+      if (facultyOccupancy.has(facSlotKey)) {
+        errors.push({
+          code: 'FACULTY_TIME_CONFLICT',
+          session,
+          facultyId: fid,
+          message: `Faculty '${fid}' is double-booked on ${session.day} ${session.period} in this timetable.`,
+        });
+      } else {
+        facultyOccupancy.set(facSlotKey, session);
+      }
+
+      // Conflict with external class schedules
+      if (existingGlobalOccupancy.has(facSlotKey)) {
+        const ext = existingGlobalOccupancy.get(facSlotKey);
+        errors.push({
+          code: 'GLOBAL_FACULTY_CONFLICT',
+          session,
+          facultyId: fid,
+          externalConflict: ext,
+          message: `Faculty '${fid}' is already scheduled in an external cohort on ${session.day} ${session.period}.`,
+        });
+      }
     }
   }
 
@@ -212,14 +221,22 @@ function validateGeneratedSchedule(assignments, problemSpec) {
           courseCode: s.courseCode,
           message: `Session for '${s.courseCode}' has no registered HOD allocation.`,
         });
-      } else if (alloc.facultyId !== s.facultyId) {
-        errors.push({
-          code: 'HOD_FACULTY_MISMATCH',
-          courseCode: s.courseCode,
-          assignedFaculty: s.facultyId,
-          expectedFaculty: alloc.facultyId,
-          message: `Session faculty '${s.facultyId}' does not match HOD authoritative faculty '${alloc.facultyId}' for '${s.courseCode}'.`,
-        });
+      } else {
+        const expectedFid = alloc.facultyId;
+        const sessionFid = s.facultyId;
+        const matchesPrimary = sessionFid === expectedFid;
+        const matchesInAssignments =
+          Array.isArray(s.facultyAssignments) && s.facultyAssignments.some((fa) => fa.facultyId === expectedFid);
+
+        if (!matchesPrimary && !matchesInAssignments) {
+          errors.push({
+            code: 'HOD_FACULTY_MISMATCH',
+            courseCode: s.courseCode,
+            assignedFaculty: s.facultyId,
+            expectedFaculty: alloc.facultyId,
+            message: `Session faculty '${s.facultyId}' does not match HOD authoritative faculty '${alloc.facultyId}' for '${s.courseCode}'.`,
+          });
+        }
       }
     }
   }

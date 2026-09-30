@@ -216,6 +216,10 @@ async function seedTimetable() {
       courseName: 'Object Oriented Software Engineering Laboratory',
       facultyId: 'FWL-03',
       facultyName: 'Dr. S. Karpusamy',
+      facultyAssignments: [
+        { facultyId: 'FWL-03', facultyName: 'Dr. S. Karpusamy', role: 'PRIMARY' },
+        { facultyId: 'FWL-04', facultyName: 'Dr. A. Manchula', role: 'ADDITIONAL' },
+      ],
       day: 'TUE',
       period: 'P5',
       room: 'Systems Lab 2',
@@ -229,6 +233,10 @@ async function seedTimetable() {
       courseName: 'Object Oriented Software Engineering Laboratory',
       facultyId: 'FWL-03',
       facultyName: 'Dr. S. Karpusamy',
+      facultyAssignments: [
+        { facultyId: 'FWL-03', facultyName: 'Dr. S. Karpusamy', role: 'PRIMARY' },
+        { facultyId: 'FWL-04', facultyName: 'Dr. A. Manchula', role: 'ADDITIONAL' },
+      ],
       day: 'TUE',
       period: 'P6',
       room: 'Systems Lab 2',
@@ -242,6 +250,10 @@ async function seedTimetable() {
       courseName: 'Object Oriented Software Engineering Laboratory',
       facultyId: 'FWL-03',
       facultyName: 'Dr. S. Karpusamy',
+      facultyAssignments: [
+        { facultyId: 'FWL-03', facultyName: 'Dr. S. Karpusamy', role: 'PRIMARY' },
+        { facultyId: 'FWL-04', facultyName: 'Dr. A. Manchula', role: 'ADDITIONAL' },
+      ],
       day: 'TUE',
       period: 'P7',
       room: 'Systems Lab 2',
@@ -283,6 +295,10 @@ async function seedTimetable() {
       courseName: 'Full Stack Development Laboratory',
       facultyId: 'FWL-14',
       facultyName: 'Ms. D. Vinoparkavi',
+      facultyAssignments: [
+        { facultyId: 'FWL-14', facultyName: 'Ms. D. Vinoparkavi', role: 'PRIMARY' },
+        { facultyId: 'FWL-06', facultyName: 'Mrs. E. Padma', role: 'ADDITIONAL' },
+      ],
       day: 'WED',
       period: 'P3',
       room: 'Web Tech Lab',
@@ -296,6 +312,10 @@ async function seedTimetable() {
       courseName: 'Full Stack Development Laboratory',
       facultyId: 'FWL-14',
       facultyName: 'Ms. D. Vinoparkavi',
+      facultyAssignments: [
+        { facultyId: 'FWL-14', facultyName: 'Ms. D. Vinoparkavi', role: 'PRIMARY' },
+        { facultyId: 'FWL-06', facultyName: 'Mrs. E. Padma', role: 'ADDITIONAL' },
+      ],
       day: 'WED',
       period: 'P4',
       room: 'Web Tech Lab',
@@ -350,6 +370,10 @@ async function seedTimetable() {
       courseName: 'Algorithms Laboratory',
       facultyId: 'FWL-06',
       facultyName: 'Mrs. E. Padma',
+      facultyAssignments: [
+        { facultyId: 'FWL-06', facultyName: 'Mrs. E. Padma', role: 'PRIMARY' },
+        { facultyId: 'FWL-12', facultyName: 'Mrs. K. Eswari', role: 'ADDITIONAL' },
+      ],
       day: 'THU',
       period: 'P1',
       room: 'Algorithms Lab',
@@ -363,6 +387,10 @@ async function seedTimetable() {
       courseName: 'Algorithms Laboratory',
       facultyId: 'FWL-06',
       facultyName: 'Mrs. E. Padma',
+      facultyAssignments: [
+        { facultyId: 'FWL-06', facultyName: 'Mrs. E. Padma', role: 'PRIMARY' },
+        { facultyId: 'FWL-12', facultyName: 'Mrs. K. Eswari', role: 'ADDITIONAL' },
+      ],
       day: 'THU',
       period: 'P2',
       room: 'Algorithms Lab',
@@ -538,13 +566,34 @@ async function seedTimetable() {
     if (s.courseCode && !s.courseCode.startsWith('22CSS')) {
       const key = `${s.academicContextId}_${s.courseCode}`;
       if (!hodAllocsMap.has(key)) {
+        const isLab = s.sessionType === 'LAB';
+        const assignments = s.facultyAssignments && s.facultyAssignments.length > 0
+          ? s.facultyAssignments.map((fa) => ({
+              facultyId: fa.facultyId,
+              facultyName: fa.facultyName,
+              role: fa.role,
+              required: fa.role !== 'OPTIONAL',
+              source: fa.role === 'PRIMARY' ? 'THEORY_LINKED' : 'MANUAL',
+            }))
+          : [
+              {
+                facultyId: s.facultyId,
+                facultyName: s.facultyName,
+                role: 'PRIMARY',
+                required: true,
+                source: 'MANUAL',
+              },
+            ];
+
         hodAllocsMap.set(key, {
           academicContextId: s.academicContextId,
           courseCode: s.courseCode,
           courseName: s.courseName,
           facultyId: s.facultyId,
           facultyName: s.facultyName,
-          allocationType: s.sessionType === 'LAB' ? 'LAB_PRIMARY' : 'THEORY',
+          allocationRule: isLab ? 'LAB_2_TO_3' : 'THEORY_SINGLE',
+          allocationType: isLab ? 'LAB_PRIMARY' : 'THEORY',
+          facultyAssignments: assignments,
           assignedBy: 'Dr. T. Rajasekaran (HOD)',
           status: 'APPROVED',
         });

@@ -178,18 +178,52 @@ async function runLiveJourney() {
     const facultyList = (facRes.body.data && (facRes.body.data.faculty || facRes.body.data.items)) || [];
     assert(facultyList.length >= 6, 'Sufficient active faculty found in directory');
 
-    // Create allocations for all 6 core courses dynamically
+    // Create allocations for all 6 core courses dynamically (supporting LAB multi-faculty and SAS dual roles)
     const facultyMap = {
-      '22CSC14': 'FWL-04',
-      '22CSC15': 'FWL-05',
-      '22CSC16': 'FWL-06',
-      '22CSP09': 'FWL-14',
-      '22CSP10': 'FWL-15',
-      '22MAN8R': 'FWL-16',
+      '22CSC14': { facultyId: 'FWL-04', assignments: [{ facultyId: 'FWL-04', role: 'THEORY' }] },
+      '22CSC15': { facultyId: 'FWL-05', assignments: [{ facultyId: 'FWL-05', role: 'THEORY' }] },
+      '22CSC16': { facultyId: 'FWL-06', assignments: [{ facultyId: 'FWL-06', role: 'THEORY' }] },
+      '22CSP09': {
+        facultyId: 'FWL-05',
+        rule: 'LAB_2_TO_3',
+        assignments: [
+          { facultyId: 'FWL-05', role: 'PRIMARY' },
+          { facultyId: 'FWL-14', role: 'ADDITIONAL' },
+        ],
+      },
+      '22CSP10': {
+        facultyId: 'FWL-06',
+        rule: 'LAB_2_TO_3',
+        assignments: [
+          { facultyId: 'FWL-06', role: 'PRIMARY' },
+          { facultyId: 'FWL-15', role: 'ADDITIONAL' },
+        ],
+      },
+      '22MAN8R': {
+        facultyId: 'FWL-01',
+        rule: 'MC_SAS',
+        assignments: [
+          { facultyId: 'FWL-01', role: 'MATHS_BME' },
+          { facultyId: 'FWL-02', role: 'ENGLISH' },
+        ],
+      },
     };
 
     const HODFacultyAllocation = require('../src/models/HODFacultyAllocation');
-    for (const [courseCode, facultyId] of Object.entries(facultyMap)) {
+    for (const [courseCode, config] of Object.entries(facultyMap)) {
+      const isLab = courseCode.includes('P');
+      const isSas = courseCode === '22MAN8R';
+      const assignments = config.assignments.map((a) => {
+        const fac = facultyList.find((f) => f.facultyId === a.facultyId);
+        return {
+          facultyId: a.facultyId,
+          facultyName: fac?.facultyName || a.facultyId,
+          role: a.role,
+          required: a.role !== 'OPTIONAL',
+          source: a.role === 'PRIMARY' ? 'THEORY_LINKED' : 'MANUAL',
+        };
+      });
+
       await HODFacultyAllocation.findOneAndUpdate(
         { academicContextId: targetContext._id, courseCode },
         {
@@ -197,9 +231,11 @@ async function runLiveJourney() {
             academicContextId: targetContext._id,
             courseCode,
             courseName: semCourses.find((c) => c.courseCode === courseCode)?.courseName || courseCode,
-            facultyId,
-            facultyName: facultyList.find((f) => f.facultyId === facultyId)?.facultyName || facultyId,
-            allocationType: courseCode.includes('P') ? 'LAB_PRIMARY' : 'THEORY',
+            facultyId: config.facultyId,
+            facultyName: facultyList.find((f) => f.facultyId === config.facultyId)?.facultyName || config.facultyId,
+            allocationRule: config.rule || (isLab ? 'LAB_2_TO_3' : isSas ? 'MC_SAS' : 'THEORY_SINGLE'),
+            allocationType: isLab ? 'LAB_PRIMARY' : isSas ? 'SAS' : 'THEORY',
+            facultyAssignments: assignments,
             status: 'APPROVED',
             assignedBy: 'HOD',
           },

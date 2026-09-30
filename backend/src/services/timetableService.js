@@ -129,7 +129,9 @@ async function solveAndPersistTimetable(input, user = {}) {
  * Strictly uses TimetableSession collection and isolates active version.
  */
 async function getFacultySchedule(facultyId, versionId = null) {
-  const filter = { facultyId };
+  const filter = {
+    $or: [{ facultyId }, { 'facultyAssignments.facultyId': facultyId }],
+  };
   if (versionId) {
     filter.timetableVersionId = versionId;
   } else {

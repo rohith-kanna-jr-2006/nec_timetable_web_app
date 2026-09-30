@@ -56,6 +56,27 @@ export async function updateHODAllocation(id, payload) {
 }
 
 /**
+ * Fetch authoritative allocation context and policy metadata for an academic context
+ * GET /api/hod-allocations/context/:academicContextId
+ */
+export async function getAllocationContext(academicContextId) {
+  const response = await api.get(`/hod-allocations/context/${encodeURIComponent(academicContextId)}`);
+  return response?.data || response;
+}
+
+/**
+ * Save / update multi-role course allocation under an academic context
+ * PUT /api/hod-allocations/context/:academicContextId/course/:courseCode
+ */
+export async function saveCourseAllocation(academicContextId, courseCode, payload) {
+  const response = await api.put(
+    `/hod-allocations/context/${encodeURIComponent(academicContextId)}/course/${encodeURIComponent(courseCode)}`,
+    payload
+  );
+  return response?.data || response;
+}
+
+/**
  * Delete allocation
  * DELETE /api/hod-allocations/:id
  */
@@ -112,7 +133,10 @@ export async function transitionTimetableVersion(id, status, rejectionReason = n
 
 export default {
   getHODAllocations,
+  getAllocationContext,
+  saveCourseAllocation,
   createHODAllocation,
+  updateHODAllocation,
   updateHODAllocationStatus,
   deleteHODAllocation,
   getClassAdvisors,

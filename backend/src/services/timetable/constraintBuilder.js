@@ -263,9 +263,66 @@ async function buildSchedulingContext(input = {}) {
     }
 
     const allocation = hodAllocs[0];
-    const authoritativeFacultyId = allocation.facultyId.trim();
+    const resolvedFacultyAssignments = [];
 
-    if (requestedFacultyId && requestedFacultyId !== authoritativeFacultyId) {
+    if (Array.isArray(allocation.facultyAssignments) && allocation.facultyAssignments.length > 0) {
+      for (const fa of allocation.facultyAssignments) {
+        const fid = fa.facultyId.trim();
+        const facultyDoc = await Faculty.findOne({ facultyId: fid });
+        if (!facultyDoc) {
+          throw new ConstraintBuilderError(
+            `Allocated faculty '${fid}' not found in Faculty database.`,
+            'FACULTY_NOT_FOUND',
+            { facultyId: fid, courseCode }
+          );
+        }
+        if (facultyDoc.isActive === false) {
+          throw new ConstraintBuilderError(
+            `Allocated faculty '${fid}' (${facultyDoc.facultyName}) is inactive.`,
+            'FACULTY_INACTIVE',
+            { facultyId: fid, courseCode }
+          );
+        }
+        facultyIdsSet.add(fid);
+        resolvedFacultyAssignments.push({
+          facultyId: fid,
+          facultyName: fa.facultyName || facultyDoc.facultyName,
+          role: fa.role || 'PRIMARY',
+        });
+      }
+    } else if (allocation.facultyId) {
+      const fid = allocation.facultyId.trim();
+      const facultyDoc = await Faculty.findOne({ facultyId: fid });
+      if (!facultyDoc) {
+        throw new ConstraintBuilderError(
+          `Allocated faculty '${fid}' not found in Faculty database.`,
+          'FACULTY_NOT_FOUND',
+          { facultyId: fid, courseCode }
+        );
+      }
+      if (facultyDoc.isActive === false) {
+        throw new ConstraintBuilderError(
+          `Allocated faculty '${fid}' (${facultyDoc.facultyName}) is inactive.`,
+          'FACULTY_INACTIVE',
+          { facultyId: fid, courseCode }
+        );
+      }
+      facultyIdsSet.add(fid);
+      resolvedFacultyAssignments.push({
+        facultyId: fid,
+        facultyName: allocation.facultyName || facultyDoc.facultyName,
+        role: allocation.allocationType === 'LAB_PRIMARY' ? 'PRIMARY' : 'THEORY',
+      });
+    }
+
+    const authoritativeFacultyId =
+      allocation.facultyId ? allocation.facultyId.trim() : resolvedFacultyAssignments[0]?.facultyId;
+
+    if (
+      requestedFacultyId &&
+      requestedFacultyId !== authoritativeFacultyId &&
+      !resolvedFacultyAssignments.some((fa) => fa.facultyId === requestedFacultyId)
+    ) {
       throw new ConstraintBuilderError(
         `Requested faculty '${requestedFacultyId}' does not match authoritative HOD allocated faculty '${authoritativeFacultyId}' for course '${courseCode}'.`,
         'HOD_FACULTY_MISMATCH',
@@ -273,31 +330,12 @@ async function buildSchedulingContext(input = {}) {
       );
     }
 
-    // Verify faculty exists and is active
-    const facultyDoc = await Faculty.findOne({ facultyId: authoritativeFacultyId });
-    if (!facultyDoc) {
-      throw new ConstraintBuilderError(
-        `Allocated faculty '${authoritativeFacultyId}' not found in Faculty database.`,
-        'FACULTY_NOT_FOUND',
-        { facultyId: authoritativeFacultyId, courseCode }
-      );
-    }
-
-    if (facultyDoc.isActive === false) {
-      throw new ConstraintBuilderError(
-        `Allocated faculty '${authoritativeFacultyId}' (${facultyDoc.facultyName}) is inactive.`,
-        'FACULTY_INACTIVE',
-        { facultyId: authoritativeFacultyId, courseCode }
-      );
-    }
-
-    facultyIdsSet.add(authoritativeFacultyId);
-
     // Determine lab vs theory classification
     const isLab =
       course.isLab === true ||
       course.courseType === 'LAB' ||
       allocation.allocationType === 'LAB_PRIMARY' ||
+      allocation.allocationRule === 'LAB_2_TO_3' ||
       (course.P >= 3 && course.L === 0);
 
     const totalPeriod = requestedPeriods || course.totalPeriod || (course.L || 0) + (course.T || 0) + (course.P || 0) || (isLab ? 4 : 3);
@@ -307,7 +345,8 @@ async function buildSchedulingContext(input = {}) {
       courseCode,
       courseName: course.courseName,
       facultyId: authoritativeFacultyId,
-      facultyName: allocation.facultyName || facultyDoc.facultyName,
+      facultyName: allocation.facultyName || resolvedFacultyAssignments[0]?.facultyName || '',
+      facultyAssignments: resolvedFacultyAssignments,
       isLab,
       totalPeriod,
       labBlockSize,
@@ -331,6 +370,7 @@ async function buildSchedulingContext(input = {}) {
           courseName: req.courseName,
           facultyId: req.facultyId,
           facultyName: req.facultyName,
+          facultyAssignments: req.facultyAssignments,
           isLab: true,
           duration: req.labBlockSize,
           sessionType: 'LAB',
@@ -346,6 +386,7 @@ async function buildSchedulingContext(input = {}) {
           courseName: req.courseName,
           facultyId: req.facultyId,
           facultyName: req.facultyName,
+          facultyAssignments: req.facultyAssignments,
           isLab: false,
           duration: 1,
           sessionType: req.sessionType,
