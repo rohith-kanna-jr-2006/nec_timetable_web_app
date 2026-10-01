@@ -7,8 +7,10 @@
     "start": "node src/server.js",
     "dev": "node --watch src/server.js",
     "seed": "node src/seeds/seed.js",
+    "migrate:tc": "node src/migrations/migrateACtoTC.js",
     "test:timetable": "node tests/authoritativeTimetableLogic.test.js",
-    "test": "node tests/authoritativeTimetableLogic.test.js && node tests/backend.test.js && node tests/facultyCreation.test.js && node tests/r22Curriculum.test.js && node tests/academicRegulation.test.js && node tests/coordinatorTimetableFlow.test.js && node tests/timetableSolver.test.js && node tests/hodCurriculumAllocation.test.js && node tests/hodMultiFacultyAllocation.test.js && node tests/productionBackendIntegrity.test.js && node tests/wholeCseDepartmentWorkflow.test.js && node tests/liveEndToEndJourney.js"
+    "test:rbac": "node tests/tcRbacEnforcement.test.js",
+    "test": "node tests/tcRbacEnforcement.test.js && node tests/authoritativeTimetableLogic.test.js && node tests/backend.test.js && node tests/facultyCreation.test.js && node tests/r22Curriculum.test.js && node tests/academicRegulation.test.js && node tests/coordinatorTimetableFlow.test.js && node tests/timetableSolver.test.js && node tests/hodCurriculumAllocation.test.js && node tests/hodMultiFacultyAllocation.test.js && node tests/productionBackendIntegrity.test.js && node tests/wholeCseDepartmentWorkflow.test.js && node tests/liveEndToEndJourney.js"
   },
   "keywords": [
     "nec",

@@ -43,18 +43,65 @@ async function transitionTimetableStatus(versionId, targetStatus, user, meta = {
     );
   }
 
-  // Only HOD or ADMIN can approve, reject, or publish
-  if (['APPROVED', 'PUBLISHED', 'REJECTED'].includes(targetStatus) && !['HOD', 'ADMIN'].includes(user.role)) {
-    throw new Error(`Only HOD has authority to transition timetable to ${targetStatus}.`);
+  /**
+   * Role-based status-transition authorization.
+   *
+   * Design authority  : TC (TimeTable Coordinator) + ADMIN
+   *   Allowed targets : DRAFT, GENERATED, PENDING_HOD_APPROVAL
+   *   Legacy note     : AC is temporarily treated as TC during the migration
+   *                     period. Remove 'AC' from this list once all AC users
+   *                     have been migrated to TC in the database.
+   *
+   * Approval authority: HOD + ADMIN
+   *   Allowed targets : APPROVED, REJECTED, PUBLISHED
+   *   HOD must NOT reach design-only targets (DRAFT, GENERATED) via this path
+   *   because the route guard has already limited HOD to the status endpoint only.
+   */
+  const role = user.role;
+
+  // Targets exclusively for HOD / ADMIN (approval workflow)
+  const HOD_ONLY_TARGETS = ['APPROVED', 'REJECTED', 'PUBLISHED'];
+
+  // Targets exclusively for TC / ADMIN (design workflow)
+  // TC may submit (→ PENDING_HOD_APPROVAL), generate (→ GENERATED), draft (→ DRAFT),
+  // and reset (→ NO_TIMETABLE from DRAFT).
+  const TC_ONLY_TARGETS = ['NO_TIMETABLE', 'DRAFT', 'GENERATED', 'PENDING_HOD_APPROVAL'];
+
+  if (HOD_ONLY_TARGETS.includes(targetStatus)) {
+    // Only HOD or ADMIN can approve, reject, or publish
+    if (!['HOD', 'ADMIN'].includes(role)) {
+      const err = new Error(`Only HOD has authority to transition timetable to ${targetStatus}.`);
+      err.statusCode = 403;
+      err.code = 'STATE_TRANSITION_ERROR';
+      throw err;
+    }
+    // HOD/ADMIN must not be blocked by the PENDING_HOD_APPROVAL guard below —
+    // they are the only ones who can act on it, so skip further checks.
+  } else if (TC_ONLY_TARGETS.includes(targetStatus)) {
+    // TC (and legacy AC during migration) may perform design transitions.
+    // HOD must NOT be able to design the timetable.
+    if (!['TC', 'AC', 'ADMIN'].includes(role)) {
+      const err = new Error(`Only the TimeTable Coordinator has authority to transition timetable to ${targetStatus}.`);
+      err.statusCode = 403;
+      err.code = 'STATE_TRANSITION_ERROR';
+      throw err;
+    }
+  } else {
+    // Unknown target — catch-all rejection
+    const err = new Error(`Unauthorized role '${role}' for timetable status transition to ${targetStatus}.`);
+    err.statusCode = 403;
+    err.code = 'STATE_TRANSITION_ERROR';
+    throw err;
   }
 
-  // AC cannot review or transition from PENDING_HOD_APPROVAL
-  if (currentStatus === 'PENDING_HOD_APPROVAL' && !['HOD', 'ADMIN'].includes(user.role)) {
-    throw new Error('Only HOD has authority to review or transition timetable from PENDING_HOD_APPROVAL.');
-  }
-
-  if (!['HOD', 'AC', 'ADMIN'].includes(user.role)) {
-    throw new Error('Unauthorized role for timetable status transition.');
+  // Regardless of role, if we are in PENDING_HOD_APPROVAL and the target is NOT
+  // a HOD approval action, it must be blocked. (A TC cannot re-generate from this
+  // state — the HOD must first reject, returning it to GENERATED/DRAFT.)
+  if (currentStatus === 'PENDING_HOD_APPROVAL' && !['HOD', 'ADMIN'].includes(role)) {
+    const err = new Error('Only HOD has authority to review or transition timetable from PENDING_HOD_APPROVAL.');
+    err.statusCode = 403;
+    err.code = 'STATE_TRANSITION_ERROR';
+    throw err;
   }
 
   version.status = targetStatus;

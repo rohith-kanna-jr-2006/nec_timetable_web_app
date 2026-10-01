@@ -92,7 +92,12 @@ async function transitionVersion(req, res, next) {
     const updated = await transitionTimetableStatus(id, status, req.user || {}, { rejectionReason });
     return successResponse(res, updated);
   } catch (error) {
-    if (error.message.includes('Only HOD has authority') || error.message.includes('Invalid status transition')) {
+    // Service-layer authorization errors carry statusCode + code.
+    if (error.statusCode === 403 || error.code === 'STATE_TRANSITION_ERROR') {
+      return errorResponse(res, error.message, 403, 'STATE_TRANSITION_ERROR');
+    }
+    // State machine constraint errors (invalid transition)
+    if (error.message && error.message.includes('Invalid status transition')) {
       return errorResponse(res, error.message, 403, 'STATE_TRANSITION_ERROR');
     }
     next(error);
