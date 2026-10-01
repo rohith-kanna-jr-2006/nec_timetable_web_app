@@ -140,13 +140,52 @@ async function solveAndPersistTimetable(input, user = {}) {
     generationSeed: input.generationSeed,
     ...input.options,
   };
+
+  const { version, context, allVariables } = problemSpec;
+
+  // Published / Approved immutability guard
+  if (version && ['PUBLISHED', 'APPROVED'].includes(version.status)) {
+    return {
+      success: false,
+      code: 'VERSION_LOCKED',
+      message: `Timetable version '${version.versionLabel || version._id}' is ${version.status} and cannot be modified.`,
+      academicContextId: context ? context._id : null,
+      timetableVersionId: version ? version._id : null,
+      status: version.status,
+      sessionsCreated: 0,
+      sessions: [],
+    };
+  }
+
   const solution = await solveTimetable(problemSpec, solverOptions);
 
   if (!solution.success) {
-    return solution;
+    return {
+      ...solution,
+      academicContextId: context ? context._id : null,
+      timetableVersionId: version ? version._id : null,
+      status: version ? version.status : null,
+      sessionsCreated: 0,
+      sessions: [],
+    };
   }
 
-  const { version, context } = problemSpec;
+  // Zero-session safety: If solver succeeded but produced zero sessions when variables were required
+  const requiredPeriods = (allVariables && allVariables.length) || 0;
+  if (requiredPeriods > 0 && (!solution.sessions || solution.sessions.length === 0)) {
+    return {
+      success: false,
+      code: 'ZERO_SESSIONS_GENERATED',
+      message: `Solver completed but produced zero scheduled sessions when ${requiredPeriods} periods were required.`,
+      academicContextId: context ? context._id : null,
+      timetableVersionId: version ? version._id : null,
+      status: version ? version.status : null,
+      sessionsCreated: 0,
+      sessions: [],
+      diagnostics: solution.diagnostics,
+      metrics: solution.metrics,
+    };
+  }
 
   // 3. Atomically persist generated sessions:
   const sessionsToInsert = solution.sessions.map((s) => ({
@@ -169,13 +208,40 @@ async function solveAndPersistTimetable(input, user = {}) {
 
   if (mongoose.connection.readyState === 1) {
     try {
+      // Regeneration safety: only delete sessions belonging to exact context + exact working version
       await TimetableSession.deleteMany({
         timetableVersionId: version._id,
         academicContextId: context._id,
       });
       inserted = await TimetableSession.insertMany(sessionsToInsert);
+
+      // Persistence assertion
+      if (sessionsToInsert.length > 0 && inserted.length !== sessionsToInsert.length) {
+        return {
+          success: false,
+          code: 'PERSISTENCE_FAILED',
+          message: `Persistence assertion failed: expected ${sessionsToInsert.length} documents, but inserted ${inserted.length}.`,
+          academicContextId: context ? context._id : null,
+          timetableVersionId: version ? version._id : null,
+          status: version ? version.status : null,
+          sessionsCreated: inserted.length,
+          sessions: inserted,
+          diagnostics: solution.diagnostics,
+        };
+      }
     } catch (dbErr) {
       console.warn('[timetableService] DB persistence warning:', dbErr.message);
+      return {
+        success: false,
+        code: 'PERSISTENCE_ERROR',
+        message: `Database error while persisting timetable sessions: ${dbErr.message}`,
+        academicContextId: context ? context._id : null,
+        timetableVersionId: version ? version._id : null,
+        status: version ? version.status : null,
+        sessionsCreated: 0,
+        sessions: [],
+        diagnostics: solution.diagnostics,
+      };
     }
   }
 
@@ -218,9 +284,13 @@ async function solveAndPersistTimetable(input, user = {}) {
 
   return {
     success: true,
+    academicContextId: context ? context._id : null,
+    timetableVersionId: version ? version._id : null,
     timetableVersion: version,
+    status: version ? version.status : 'GENERATED',
     generationSeed: solution.generationSeed,
     sessionsCreated: inserted.length,
+    sessions: inserted,
     assignments: inserted,
     metrics: solution.metrics,
     diagnostics: solution.diagnostics,
@@ -276,14 +346,22 @@ async function getClassSchedule(academicContextId, versionId = null) {
       const context = await AcademicContext.findById(academicContextId);
       if (!context) return [];
 
-      const publishedVersion = await TimetableVersion.findOne({
-        academicYear: context.academicYear,
-        semester: context.semester,
-        department: context.department,
-        ...(context.year ? { year: context.year } : {}),
-        ...(context.section ? { section: context.section } : {}),
+      // Phase 2: Prefer academicContextId anchor first, then 5-field fallback
+      let publishedVersion = await TimetableVersion.findOne({
+        academicContextId: context._id,
         status: 'PUBLISHED',
       }).sort({ publishedAt: -1, createdAt: -1 });
+
+      if (!publishedVersion) {
+        publishedVersion = await TimetableVersion.findOne({
+          academicYear: context.academicYear,
+          semester: context.semester,
+          department: context.department,
+          ...(context.year ? { year: context.year } : {}),
+          ...(context.section ? { section: context.section } : {}),
+          status: 'PUBLISHED',
+        }).sort({ publishedAt: -1, createdAt: -1 });
+      }
 
       if (!publishedVersion) return [];
       filter.timetableVersionId = publishedVersion._id;

@@ -96,17 +96,35 @@ async function buildSchedulingContext(input = {}) {
       );
     }
   } else {
-    // Find latest draft/generated version or prepare one
+    // Find latest draft/generated version anchored to this context first (Phase 2),
+    // then fall back to 5-field legacy match for backward compat.
     version = await TimetableVersion.findOne({
-      academicYear: context.academicYear,
-      semester: context.semester,
-      department: context.department,
-      year: context.year,
-      section: context.section,
+      academicContextId: context._id,
+      status: { $nin: ['PUBLISHED', 'APPROVED'] },
     }).sort({ createdAt: -1 });
 
-    if (!version || ['PUBLISHED', 'APPROVED'].includes(version.status)) {
+    if (!version) {
+      // Legacy 5-field fallback for versions created before Phase 2
+      version = await TimetableVersion.findOne({
+        academicYear: context.academicYear,
+        semester: context.semester,
+        department: context.department,
+        year: context.year,
+        section: context.section,
+        status: { $nin: ['PUBLISHED', 'APPROVED'] },
+      }).sort({ createdAt: -1 });
+
+      if (version && !version.academicContextId) {
+        // Backfill context anchor on the found legacy version
+        await TimetableVersion.findByIdAndUpdate(version._id, { academicContextId: context._id });
+        version.academicContextId = context._id;
+      }
+    }
+
+    if (!version) {
+      // No suitable working version — create a new one anchored to this context
       version = await TimetableVersion.create({
+        academicContextId: context._id,
         academicYear: context.academicYear,
         semester: context.semester,
         department: context.department,
@@ -117,6 +135,19 @@ async function buildSchedulingContext(input = {}) {
         status: 'GENERATED',
         generatedBy: 'Auto-Solver',
       });
+    }
+  }
+
+  // Version-context ownership validation (applies when both IDs were supplied)
+  if (timetableVersionId && version.academicContextId) {
+    const vCtxId = version.academicContextId.toString();
+    const reqCtxId = context._id.toString();
+    if (vCtxId !== reqCtxId) {
+      throw new ConstraintBuilderError(
+        `Timetable version '${version._id}' belongs to context '${vCtxId}', not to requested context '${reqCtxId}'.`,
+        'TIMETABLE_VERSION_CONTEXT_MISMATCH',
+        { versionContextId: vCtxId, requestedContextId: reqCtxId }
+      );
     }
   }
 

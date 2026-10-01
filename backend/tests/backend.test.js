@@ -610,6 +610,7 @@ async function runTests() {
     // ------------------------------------------------------------
     console.log('\n--- Test 17: Timetable Version State Machine ---');
     const ttVersion = await TimetableVersion.create({
+      academicContextId: contextId,
       academicYear: '2026-27',
       semester: 'Odd Semester',
       department: 'CSE',

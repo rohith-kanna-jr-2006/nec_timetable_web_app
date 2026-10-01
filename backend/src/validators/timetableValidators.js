@@ -4,18 +4,26 @@
 
 function validateTimetableVersion(req) {
   const errors = [];
-  const { academicYear, semester, department } = req.body || {};
+  const { academicContextId, academicYear, semester, department } = req.body || {};
 
-  if (!academicYear || typeof academicYear !== 'string' || !academicYear.trim()) {
-    errors.push('academicYear is required');
-  }
+  // Phase 2: academicContextId is the authoritative anchor.
+  // If supplied, legacy 5-field strings are optional and will be resolved canonical.
+  if (academicContextId) {
+    if (typeof academicContextId !== 'string' || !academicContextId.trim()) {
+      errors.push('academicContextId must be a valid non-empty string');
+    }
+  } else {
+    if (!academicYear || typeof academicYear !== 'string' || !academicYear.trim()) {
+      errors.push('academicYear is required when academicContextId is omitted');
+    }
 
-  if (!semester || typeof semester !== 'string' || !semester.trim()) {
-    errors.push('semester is required');
-  }
+    if (!semester || typeof semester !== 'string' || !semester.trim()) {
+      errors.push('semester is required when academicContextId is omitted');
+    }
 
-  if (!department || typeof department !== 'string' || !department.trim()) {
-    errors.push('department is required');
+    if (!department || typeof department !== 'string' || !department.trim()) {
+      errors.push('department is required when academicContextId is omitted');
+    }
   }
 
   return errors;

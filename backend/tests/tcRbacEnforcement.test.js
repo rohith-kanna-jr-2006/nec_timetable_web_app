@@ -1,4 +1,4 @@
-﻿/**
+/**
  * TC RBAC Enforcement Test Suite
  *
  * Validates the Phase 1 timetable governance role separation:
@@ -293,6 +293,7 @@ async function run() {
 
   // HOD reject test (need a fresh pending version)
   const hodRejectVersion = await TimetableVersion.create({
+    academicContextId: ctx._id,
     academicYear: ctx.academicYear,
     semester: ctx.semester || 'Odd Semester',
     department: ctx.department,
@@ -337,6 +338,7 @@ async function run() {
   console.log('\n--- HOD Design-Transition Block (must return 403) ---');
 
   const hodDesignVersion = await TimetableVersion.create({
+    academicContextId: ctx._id,
     academicYear: ctx.academicYear,
     semester: ctx.semester || 'Odd Semester',
     department: ctx.department,

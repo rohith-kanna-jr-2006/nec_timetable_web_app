@@ -122,6 +122,12 @@ async function runTests() {
     const hodToken = generateToken(hodUser);
     const authHeaders = { Authorization: `Bearer ${hodToken}` };
 
+    let tcUser = await User.findOne({ role: 'TC' });
+    if (!tcUser) tcUser = await User.findOne({ role: 'AC' });
+    if (!tcUser) tcUser = await User.findOne({ role: 'ADMIN' });
+    const tcToken = generateToken(tcUser);
+    const tcHeaders = { Authorization: `Bearer ${tcToken}` };
+
     // Locate target contexts
     let ctxIII_A = await AcademicContext.findOne({ department: 'CSE', year: 'III Year', section: 'A' });
     if (!ctxIII_A) {
@@ -789,6 +795,7 @@ async function runTests() {
 
     // Create a timetable version for testing
     let testVersion = await TimetableVersion.create({
+      academicContextId: ctxIII_A._id,
       academicYear: '2026-27',
       semester: 'Odd Semester',
       department: 'CSE',
@@ -857,7 +864,7 @@ async function runTests() {
     const conflictRes = await makeRequest(app, {
       method: 'POST',
       path: '/api/timetable/session',
-      headers: authHeaders,
+      headers: tcHeaders,
       body: {
         timetableVersionId: testVersion._id,
         academicContextId: ctxIII_A._id,
@@ -876,8 +883,8 @@ async function runTests() {
     // ============================================================
     console.log('\n--- SECTION 7: Lifecycle Preservation (GENERATED -> PENDING_HOD_APPROVAL -> APPROVED -> PUBLISHED) ---');
 
-    // Transition version: GENERATED -> PENDING_HOD_APPROVAL
-    await transitionTimetableStatus(testVersion._id, 'PENDING_HOD_APPROVAL', hodUser);
+    // Transition version: GENERATED -> PENDING_HOD_APPROVAL (by TC / AC)
+    await transitionTimetableStatus(testVersion._id, 'PENDING_HOD_APPROVAL', tcUser);
     let vAfterSubmit = await TimetableVersion.findById(testVersion._id);
     assert(vAfterSubmit.status === 'PENDING_HOD_APPROVAL', 'Version transitioned to PENDING_HOD_APPROVAL');
 

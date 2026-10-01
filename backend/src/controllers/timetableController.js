@@ -14,18 +14,110 @@ const { ConstraintBuilderError } = require('../services/timetable/constraintBuil
 const { getAcademicContextWorkflowStatus } = require('../services/contextStatusService');
 const { successResponse, errorResponse } = require('../utils/responseHandler');
 
+// ---------------------------------------------------------------------------
+// Phase 2 Private Helpers
+// ---------------------------------------------------------------------------
+
+/** Canonical context summary shape returned in every endpoint response */
+function _contextSummary(ctx) {
+  if (!ctx) return null;
+  return {
+    id: ctx._id,
+    academicYear: ctx.academicYear,
+    semester: ctx.semester,
+    department: ctx.department,
+    year: ctx.year,
+    section: ctx.section,
+    program: ctx.program,
+    status: ctx.status,
+  };
+}
+
+/** Canonical version summary shape returned in every endpoint response */
+function _versionSummary(v) {
+  if (!v) return null;
+  return {
+    id: v._id,
+    academicContextId: v.academicContextId || null,
+    version: v.version,
+    versionLabel: v.versionLabel,
+    status: v.status,
+    academicYear: v.academicYear,
+    semester: v.semester,
+    department: v.department,
+    year: v.year,
+    section: v.section,
+    generatedBy: v.generatedBy,
+    submittedBy: v.submittedBy,
+    approvedBy: v.approvedBy,
+    totalScheduledPeriods: v.totalScheduledPeriods,
+  };
+}
+
+/**
+ * Finds the latest published TimetableVersion strictly belonging to the given context.
+ * Phase 2: prefers academicContextId FK; falls back to 5-field match for legacy docs.
+ */
+async function _findPublishedVersionForContext(context) {
+  // Primary: direct FK lookup (Phase 2 anchored documents)
+  let v = await TimetableVersion.findOne({
+    academicContextId: context._id,
+    status: 'PUBLISHED',
+  }).sort({ publishedAt: -1, createdAt: -1 });
+
+  if (!v) {
+    // Fallback: 5-field match for pre-Phase-2 documents
+    v = await TimetableVersion.findOne({
+      academicYear: context.academicYear,
+      semester: context.semester,
+      department: context.department,
+      ...(context.year ? { year: context.year } : {}),
+      ...(context.section ? { section: context.section } : {}),
+      status: 'PUBLISHED',
+    }).sort({ publishedAt: -1, createdAt: -1 });
+  }
+
+  return v || null;
+}
+
+/**
+ * 5-field fallback check: does this version belong to this context?
+ * Used only for legacy versions that have no academicContextId set.
+ * Returns true if all 5 canonical fields match.
+ */
+async function _versionBelongsToContext(version, context) {
+  if (!version || !context) return false;
+  const yearMatch = !context.year || version.year === context.year;
+  const sectionMatch = !context.section || version.section === context.section;
+  return (
+    version.academicYear === context.academicYear &&
+    version.semester === context.semester &&
+    version.department === context.department &&
+    yearMatch &&
+    sectionMatch
+  );
+}
+
 /**
  * Get timetable versions
  * GET /api/timetable/versions
+ * Supports: ?academicContextId= (Phase 2 primary filter)
+ *           ?department= ?semester= ?academicYear= ?status= (legacy filters)
  */
 async function getVersions(req, res, next) {
   try {
-    const { department, semester, academicYear, status } = req.query;
+    const { department, semester, academicYear, status, academicContextId } = req.query;
     const query = {};
 
-    if (department) query.department = department.toUpperCase().trim();
-    if (semester) query.semester = semester.trim();
-    if (academicYear) query.academicYear = academicYear.trim();
+    // Phase 2: prefer academicContextId filter
+    if (academicContextId) {
+      query.academicContextId = academicContextId;
+    } else {
+      // Legacy 5-field filters
+      if (department) query.department = department.toUpperCase().trim();
+      if (semester) query.semester = semester.trim();
+      if (academicYear) query.academicYear = academicYear.trim();
+    }
     if (status) query.status = status;
 
     const versions = await TimetableVersion.find(query).sort({ createdAt: -1 });
@@ -38,10 +130,11 @@ async function getVersions(req, res, next) {
 /**
  * Get single version by ID
  * GET /api/timetable/version/:id
+ * Returns academicContextId in the payload (Phase 2)
  */
 async function getVersionById(req, res, next) {
   try {
-    const version = await TimetableVersion.findById(req.params.id);
+    const version = await TimetableVersion.findById(req.params.id).populate('academicContextId', 'academicYear semester department year section program status');
     if (!version) {
       return errorResponse(res, 'Timetable version not found', 404, 'NOT_FOUND');
     }
@@ -54,18 +147,56 @@ async function getVersionById(req, res, next) {
 /**
  * Create a new timetable version
  * POST /api/timetable/version
+ *
+ * Phase 2: academicContextId is the authoritative anchor.
+ * If supplied, context fields are resolved from AcademicContext.
+ * If only legacy fields supplied, we look up the context and still anchor.
  */
 async function createVersion(req, res, next) {
   try {
-    const { academicYear, semester, department, year, section, versionLabel } = req.body;
+    const { academicContextId, academicYear, semester, department, year, section, versionLabel, label } = req.body;
+
+    let context = null;
+
+    if (academicContextId) {
+      context = await AcademicContext.findById(academicContextId);
+      if (!context) {
+        return errorResponse(res, `Academic context '${academicContextId}' not found`, 404, 'NOT_FOUND');
+      }
+      if (context.status !== 'ACTIVE') {
+        return errorResponse(res, `Academic context '${academicContextId}' is not active`, 400, 'INVALID_CONTEXT');
+      }
+    } else if (academicYear && semester && department) {
+      // Legacy path: resolve context from 5 fields
+      const ctxQuery = {
+        academicYear: academicYear.trim(),
+        semester: semester.trim(),
+        department: department.toUpperCase().trim(),
+      };
+      if (year) ctxQuery.year = year.trim();
+      if (section) ctxQuery.section = section.trim();
+      context = await AcademicContext.findOne(ctxQuery);
+      // context may be null here — version creation still proceeds for backward compat
+    }
+
+    const resolvedAcademicYear = context ? context.academicYear : (academicYear || '');
+    const resolvedSemester = context ? context.semester : (semester || '');
+    const resolvedDepartment = context ? context.department : (department ? department.toUpperCase().trim() : '');
+    const resolvedYear = context ? context.year : (year || null);
+    const resolvedSection = context ? context.section : (section || null);
+
+    if (!resolvedAcademicYear || !resolvedSemester || !resolvedDepartment) {
+      return errorResponse(res, 'academicContextId or (academicYear, semester, department) is required', 400, 'BAD_REQUEST');
+    }
 
     const version = await TimetableVersion.create({
-      academicYear,
-      semester,
-      department: department.toUpperCase().trim(),
-      year: year || null,
-      section: section || null,
-      versionLabel: versionLabel || 'v1.0',
+      academicContextId: context ? context._id : null,
+      academicYear: resolvedAcademicYear,
+      semester: resolvedSemester,
+      department: resolvedDepartment,
+      year: resolvedYear,
+      section: resolvedSection,
+      versionLabel: versionLabel || label || 'v1.0',
       status: 'NO_TIMETABLE',
       generatedBy: req.user ? req.user.name : null,
     });
@@ -123,8 +254,8 @@ async function getFacultyTimetable(req, res, next) {
 /**
  * Get schedule for a class.
  * Public default returns strictly PUBLISHED timetable.
- * If no published timetable exists, returns actionable workflow state (e.g. READY_FOR_GENERATION, ALLOCATION_INCOMPLETE)
- * rather than a generic dead-end.
+ * Phase 2: When versionId is supplied, validates version belongs to
+ * the requested academicContextId. Returns 409 on context mismatch.
  * GET /api/timetable/class/:academicContextId
  */
 async function getClassTimetable(req, res, next) {
@@ -137,32 +268,46 @@ async function getClassTimetable(req, res, next) {
       return errorResponse(res, 'Academic context not found', 404, 'NOT_FOUND');
     }
 
-    // Check if published version exists
-    const publishedVersion = await TimetableVersion.findOne({
-      academicYear: context.academicYear,
-      semester: context.semester,
-      department: context.department,
-      ...(context.year ? { year: context.year } : {}),
-      ...(context.section ? { section: context.section } : {}),
-      status: 'PUBLISHED',
-    }).sort({ publishedAt: -1, createdAt: -1 });
+    // Phase 2: If an explicit versionId was supplied, validate ownership before serving
+    if (versionId) {
+      const requestedVersion = await TimetableVersion.findById(versionId);
+      if (!requestedVersion) {
+        return errorResponse(res, 'Timetable version not found', 404, 'NOT_FOUND');
+      }
+      // Validate: version must belong to this context
+      const versionOwnsContext = requestedVersion.academicContextId
+        ? requestedVersion.academicContextId.toString() === context._id.toString()
+        : await _versionBelongsToContext(requestedVersion, context);
+      if (!versionOwnsContext) {
+        return errorResponse(
+          res,
+          `Timetable version '${versionId}' does not belong to academic context '${academicContextId}'.`,
+          409,
+          'TIMETABLE_VERSION_CONTEXT_MISMATCH'
+        );
+      }
+      // Serve this explicit version (authenticated internal review)
+      const sessions = await getClassSchedule(academicContextId, versionId);
+      return successResponse(res, {
+        academicContextId: context._id,
+        academicContext: _contextSummary(context),
+        isPublished: requestedVersion.status === 'PUBLISHED',
+        timetableVersionId: requestedVersion._id,
+        timetableVersion: _versionSummary(requestedVersion),
+        sessionCount: sessions.length,
+        sessions,
+      });
+    }
 
-    // If no published version exists and no specific version was requested:
-    // Missing Timetable != Missing Data! Return actionable workflow state.
-    if (!publishedVersion && !versionId) {
+    // Public path: find published version scoped to this exact context
+    const publishedVersion = await _findPublishedVersionForContext(context);
+
+    // If no published version and no explicit version requested: return workflow state
+    if (!publishedVersion) {
       const workflow = await getAcademicContextWorkflowStatus(context._id);
       return successResponse(res, {
         academicContextId: context._id,
-        academicContext: {
-          id: context._id,
-          academicYear: context.academicYear,
-          semester: context.semester,
-          department: context.department,
-          year: context.year,
-          section: context.section,
-          program: context.program,
-          status: context.status,
-        },
+        academicContext: _contextSummary(context),
         isPublished: false,
         state: workflow.state,
         nextAction: workflow.nextAction,
@@ -173,21 +318,13 @@ async function getClassTimetable(req, res, next) {
       });
     }
 
-    const sessions = await getClassSchedule(academicContextId, versionId);
+    const sessions = await getClassSchedule(academicContextId, publishedVersion._id);
     return successResponse(res, {
       academicContextId: context._id,
-      academicContext: {
-        id: context._id,
-        academicYear: context.academicYear,
-        semester: context.semester,
-        department: context.department,
-        year: context.year,
-        section: context.section,
-        program: context.program,
-        status: context.status,
-      },
-      isPublished: !!publishedVersion,
-      timetableVersionId: publishedVersion ? publishedVersion._id : versionId || null,
+      academicContext: _contextSummary(context),
+      isPublished: true,
+      timetableVersionId: publishedVersion._id,
+      timetableVersion: _versionSummary(publishedVersion),
       sessionCount: sessions.length,
       sessions,
     });
@@ -221,6 +358,8 @@ async function getContextStatus(req, res, next) {
 
 /**
  * Review Matrix API endpoint with exact context & version isolation
+ * Phase 2: validates version-context ownership when both are supplied.
+ * Context-scoped fallback when versionId is omitted.
  * GET /api/timetable/review-matrix
  * GET /api/timetable/matrix
  */
@@ -243,27 +382,45 @@ async function getReviewMatrix(req, res, next) {
       if (!version) {
         return errorResponse(res, 'Timetable version not found', 404, 'NOT_FOUND');
       }
+      // Phase 2: validate version belongs to the requested context
+      if (context) {
+        const owns = version.academicContextId
+          ? version.academicContextId.toString() === context._id.toString()
+          : await _versionBelongsToContext(version, context);
+        if (!owns) {
+          return errorResponse(
+            res,
+            `Timetable version '${targetVersionId}' does not belong to academic context '${academicContextId}'.`,
+            409,
+            'TIMETABLE_VERSION_CONTEXT_MISMATCH'
+          );
+        }
+      }
     } else if (context) {
-      version = await TimetableVersion.findOne({
-        academicYear: context.academicYear,
-        semester: context.semester,
-        department: context.department,
-        ...(context.year ? { year: context.year } : {}),
-        ...(context.section ? { section: context.section } : {}),
-        status: 'PUBLISHED',
-      }).sort({ publishedAt: -1, createdAt: -1 });
+      // Context-scoped fallback: prefer published, then latest non-published
+      version = await _findPublishedVersionForContext(context);
 
       if (!version) {
+        // Try latest non-published version anchored to this context
         version = await TimetableVersion.findOne({
-          academicYear: context.academicYear,
-          semester: context.semester,
-          department: context.department,
-          ...(context.year ? { year: context.year } : {}),
-          ...(context.section ? { section: context.section } : {}),
+          academicContextId: context._id,
           status: { $in: ['APPROVED', 'PENDING_HOD_APPROVAL', 'GENERATED', 'DRAFT'] },
         }).sort({ updatedAt: -1, createdAt: -1 });
+
+        if (!version) {
+          // Legacy 5-field fallback
+          version = await TimetableVersion.findOne({
+            academicYear: context.academicYear,
+            semester: context.semester,
+            department: context.department,
+            ...(context.year ? { year: context.year } : {}),
+            ...(context.section ? { section: context.section } : {}),
+            status: { $in: ['APPROVED', 'PENDING_HOD_APPROVAL', 'GENERATED', 'DRAFT'] },
+          }).sort({ updatedAt: -1, createdAt: -1 });
+        }
       }
     } else {
+      // No context supplied: global published-only fallback
       version = await TimetableVersion.findOne({ status: 'PUBLISHED' }).sort({ publishedAt: -1, createdAt: -1 });
     }
 
@@ -298,32 +455,9 @@ async function getReviewMatrix(req, res, next) {
 
     return successResponse(res, {
       academicContextId: context ? context._id : null,
-      academicContext: context
-        ? {
-            id: context._id,
-            academicYear: context.academicYear,
-            semester: context.semester,
-            department: context.department,
-            year: context.year,
-            section: context.section,
-            program: context.program,
-            status: context.status,
-          }
-        : null,
+      academicContext: context ? _contextSummary(context) : null,
       timetableVersionId: version ? version._id : null,
-      timetableVersion: version
-        ? {
-            id: version._id,
-            version: version.version,
-            versionLabel: version.versionLabel,
-            status: version.status,
-            academicYear: version.academicYear,
-            semester: version.semester,
-            department: version.department,
-            year: version.year,
-            section: version.section,
-          }
-        : null,
+      timetableVersion: version ? _versionSummary(version) : null,
       sessionCount: sessions.length,
       sessions,
     });
@@ -334,20 +468,27 @@ async function getReviewMatrix(req, res, next) {
 
 /**
  * Get published timetable for a class
+ * Phase 2: scope to exact context — no more global findOne.
  * GET /api/timetable/published/:academicContextId
  */
 async function getPublishedClassTimetable(req, res, next) {
   try {
     const { academicContextId } = req.params;
 
-    // Find latest published timetable version
-    const publishedVersion = await TimetableVersion.findOne({ status: 'PUBLISHED' }).sort({ publishedAt: -1 });
+    const context = await AcademicContext.findById(academicContextId);
+    if (!context) {
+      return errorResponse(res, 'Academic context not found', 404, 'NOT_FOUND');
+    }
+
+    // Phase 2: find published version scoped to this exact context
+    const publishedVersion = await _findPublishedVersionForContext(context);
 
     if (!publishedVersion) {
       return successResponse(res, {
         academicContextId,
+        academicContext: _contextSummary(context),
         isPublished: false,
-        message: 'No published timetable version found.',
+        message: 'No published timetable version found for this class.',
         sessions: [],
       });
     }
@@ -355,10 +496,13 @@ async function getPublishedClassTimetable(req, res, next) {
     const sessions = await getClassSchedule(academicContextId, publishedVersion._id);
     return successResponse(res, {
       academicContextId,
+      academicContext: _contextSummary(context),
       versionId: publishedVersion._id,
+      timetableVersion: _versionSummary(publishedVersion),
       versionLabel: publishedVersion.versionLabel,
       publishedAt: publishedVersion.publishedAt,
       isPublished: true,
+      sessionCount: sessions.length,
       sessions,
     });
   } catch (error) {
@@ -422,15 +566,26 @@ async function createSession(req, res, next) {
 
     if (!version) {
       version = await TimetableVersion.findOne({
-        academicYear: context.academicYear,
-        semester: context.semester,
-        department: context.department,
-        year: context.year,
-        section: context.section,
+        academicContextId: context._id,
+        status: { $nin: ['PUBLISHED', 'APPROVED'] },
       }).sort({ createdAt: -1 });
 
       if (!version) {
+        // Legacy 5-field fallback
+        version = await TimetableVersion.findOne({
+          academicYear: context.academicYear,
+          semester: context.semester,
+          department: context.department,
+          year: context.year,
+          section: context.section,
+          status: { $nin: ['PUBLISHED', 'APPROVED'] },
+        }).sort({ createdAt: -1 });
+      }
+
+      if (!version) {
+        // Auto-create a working draft anchored to the context
         version = await TimetableVersion.create({
+          academicContextId: context._id,
           academicYear: context.academicYear,
           semester: context.semester,
           department: context.department,
@@ -439,7 +594,7 @@ async function createSession(req, res, next) {
           version: 1,
           versionLabel: 'v1.0 (Working Draft)',
           status: 'GENERATED',
-          generatedBy: req.user ? req.user.name || req.user.email : 'AC',
+          generatedBy: req.user ? req.user.name || req.user.email : 'TC',
         });
       }
     }

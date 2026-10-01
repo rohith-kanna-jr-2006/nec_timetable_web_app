@@ -286,7 +286,10 @@ async function runWholeCseTestSuite() {
       method: 'GET',
       path: `/api/timetable/review-matrix?academicContextId=${ctxII_A._id}&timetableVersionId=${generatedVersion._id}`,
     });
-    assert(crossRes.body.data.sessionCount === 0, 'Cross-cohort matrix query returns 0 sessions (strict isolation)');
+    assert(
+      crossRes.statusCode === 409 || crossRes.body?.data?.sessionCount === 0,
+      'Cross-cohort matrix query rejected with HTTP 409 or 0 sessions (strict isolation)'
+    );
 
     // Step F: Public View isolation before publishing (Draft MUST NOT leak)
     const publicBeforePublish = await makeRequest(app, {

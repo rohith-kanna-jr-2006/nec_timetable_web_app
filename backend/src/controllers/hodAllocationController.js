@@ -97,8 +97,20 @@ async function getAllocationContext(req, res, next) {
       const electiveCourses = await Course.find({
         courseCode: { $in: allocatedElectiveCodes },
         isActive: true,
+        $or: [
+          { category: { $in: ['PEC', 'OEC'] } },
+          { semester: { $in: ['Programme Elective', 'Open Elective'] } },
+          { semester: expectedSemester },
+        ],
       });
-      allCohortCourses = [...curriculumCourses, ...electiveCourses];
+      // Exclude any core courses from other semesters that might exist in historical allocations
+      const validElectiveCourses = electiveCourses.filter((crs) => {
+        if (crs.semester && crs.semester.startsWith('Semester ') && crs.semester.toUpperCase() !== expectedSemester.toUpperCase()) {
+          return false;
+        }
+        return true;
+      });
+      allCohortCourses = [...curriculumCourses, ...validElectiveCourses];
     }
 
     // 3. Load all active faculties for lookup

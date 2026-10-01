@@ -233,6 +233,7 @@ async function runCoordinatorTimetableFlowTests() {
     });
     if (!testVersion) {
       testVersion = await TimetableVersion.create({
+        academicContextId: ctxIII_A._id,
         academicYear: '2026-27',
         semester: 'Odd Semester',
         department: 'CSE',
@@ -242,6 +243,9 @@ async function runCoordinatorTimetableFlowTests() {
         versionLabel: 'v2.0 Test Suite',
         status: 'GENERATED',
       });
+    } else if (!testVersion.academicContextId) {
+      testVersion.academicContextId = ctxIII_A._id;
+      await testVersion.save();
     }
 
     // ------------------------------------------------------------
