@@ -92,6 +92,14 @@ export default function CoordinatorDashboard() {
             >
               Solver Studio
             </Button>
+            <Button
+              variant="primary"
+              size="sm"
+              icon="📅"
+              onClick={() => navigate('/coordinator/view')}
+            >
+              View Timetable
+            </Button>
           </div>
         }
       />
