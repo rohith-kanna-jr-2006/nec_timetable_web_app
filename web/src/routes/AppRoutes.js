@@ -85,7 +85,7 @@ export default function AppRoutes() {
         </Route>
       </Route>
 
-      {/* Protected Academic Coordinator routes (AC, ADMIN) */}
+      {/* Protected TimeTable Coordinator routes (AC, ADMIN) */}
       <Route element={<ProtectedRoute allowedRoles={['AC', 'ADMIN']} />}>
         <Route path="/coordinator" element={<CoordinatorLayout />}>
           <Route index element={<Navigate to="/coordinator/dashboard" replace />} />

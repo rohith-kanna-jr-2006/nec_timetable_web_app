@@ -417,12 +417,97 @@ export function calculateAssignmentPlanStatus(rows = [], { hasContext = true, lo
   };
 }
 
+/**
+ * Computes a human-readable display string for the HOD-approved faculty of a course.
+ * Handles all allocation-rule variants:
+ *  - THEORY_SINGLE / legacy {facultyId}   → "Name (ID)"
+ *  - LAB_2_TO_3  (PRIMARY / ADDITIONAL / OPTIONAL)
+ *  - MC_SAS      (MATHS_BME / ENGLISH)
+ *  - MC_DEPARTMENT / MC_OPTIONAL_MAPPING (PRIMARY)
+ *
+ * Returns a plain-text string used for display only; never mutates or writes to backend.
+ */
+export function resolveCourseFacultyDisplay(allocations = [], academicContextId, courseIdentifier) {
+  const targetCtxId = normalizeContextId(academicContextId);
+  const targetCode = typeof courseIdentifier === 'object'
+    ? normalizeCourseCode(courseIdentifier.courseCode)
+    : normalizeCourseCode(courseIdentifier);
+  const targetCourseId = typeof courseIdentifier === 'object'
+    ? String(courseIdentifier._id || courseIdentifier.id || '')
+    : '';
+
+  const matching = allocations.filter((a) => {
+    if (a.status === 'REJECTED') return false;
+    const aCtxId = normalizeContextId(a.academicContextId);
+    if (aCtxId && targetCtxId && aCtxId !== targetCtxId) return false;
+    if (targetCourseId && a.courseId && String(a.courseId) === targetCourseId) return true;
+    return normalizeCourseCode(a.courseCode) === targetCode;
+  });
+
+  if (matching.length === 0) {
+    return { display: '[REQUIRES HOD DECISION]', allocated: false, assignments: [] };
+  }
+  if (matching.length > 1) {
+    return { display: '[CONFLICT: MULTIPLE ALLOCATIONS]', allocated: false, assignments: [] };
+  }
+
+  const alloc = matching[0];
+  const rule = alloc.allocationRule;
+  const rawAssignments = alloc.facultyAssignments || [];
+
+  if (rule === 'LAB_2_TO_3' && rawAssignments.length > 0) {
+    const byRole = {};
+    rawAssignments.forEach((fa) => { byRole[fa.role] = fa; });
+    const lines = [];
+    const p = byRole['PRIMARY'] || byRole['THEORY'];
+    if (p?.facultyName) lines.push(`Primary: ${p.facultyName}`);
+    const add = byRole['ADDITIONAL'];
+    if (add?.facultyName) lines.push(`Additional: ${add.facultyName}`);
+    const opt = byRole['OPTIONAL'];
+    if (opt?.facultyName) lines.push(`Optional: ${opt.facultyName}`);
+    const display = lines.length > 0 ? lines.join('\n') : `[REQUIRES HOD DECISION]`;
+    return { display, allocated: lines.length > 0, assignments: rawAssignments };
+  }
+
+  if (rule === 'MC_SAS' && rawAssignments.length > 0) {
+    const byRole = {};
+    rawAssignments.forEach((fa) => { byRole[fa.role] = fa; });
+    const lines = [];
+    const maths = byRole['MATHS_BME'];
+    if (maths?.facultyName) lines.push(`Maths / BME: ${maths.facultyName}`);
+    const english = byRole['ENGLISH'];
+    if (english?.facultyName) lines.push(`English: ${english.facultyName}`);
+    const display = lines.length > 0 ? lines.join('\n') : `[REQUIRES HOD DECISION]`;
+    return { display, allocated: lines.length > 0, assignments: rawAssignments };
+  }
+
+  if (rule === 'MC_DEPARTMENT' && rawAssignments.length > 0) {
+    const primary = rawAssignments.find((a) => a.role === 'PRIMARY');
+    if (primary?.facultyName) {
+      return { display: primary.facultyName, allocated: true, assignments: rawAssignments };
+    }
+  }
+
+  // Legacy single-faculty (THEORY_SINGLE or null)
+  const fname = alloc.facultyName || '';
+  const fid = alloc.facultyId || '';
+  const display = fname ? `${fname}${fid ? ' (' + fid + ')' : ''}` : '[REQUIRES HOD DECISION]';
+  return {
+    display,
+    allocated: !!fname,
+    assignments: rawAssignments.length > 0 ? rawAssignments : [],
+    primaryFacultyId: fid,
+    primaryFacultyName: fname,
+  };
+}
+
 export default {
   DEFAULT_ELECTIVE_SLOT_MAP,
   fetchAllCoursesForContext,
   normalizeCourseCode,
   normalizeContextId,
   resolveAuthoritativeHODFaculty,
+  resolveCourseFacultyDisplay,
   deriveAutomaticCourseRows,
   calculateAssignmentPlanStatus,
 };

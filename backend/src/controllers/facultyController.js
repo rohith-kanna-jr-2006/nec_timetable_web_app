@@ -33,7 +33,15 @@ async function getFacultyList(req, res, next) {
     }
 
     if (department) {
-      query.department = { $regex: department.trim(), $options: 'i' };
+      const deptStr = department.trim();
+      const norm = deptStr.toUpperCase();
+      if (norm === 'CSE' || norm.includes('COMPUTER')) {
+        query.department = { $regex: 'Computer Science|CSE', $options: 'i' };
+      } else if (norm === 'ECE' || norm.includes('ELECTRONICS')) {
+        query.department = { $regex: 'Electronics|ECE', $options: 'i' };
+      } else {
+        query.department = { $regex: deptStr, $options: 'i' };
+      }
     }
 
     if (role) {

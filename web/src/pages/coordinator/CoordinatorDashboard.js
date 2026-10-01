@@ -67,13 +67,13 @@ export default function CoordinatorDashboard() {
   return (
     <div>
       <PageHeader
-        title="Academic Coordinator Operational Desk"
+        title="TimeTable Coordinator Operational Desk"
         description="Curriculum subject mapping, candidate faculty pool nominations, and automated timetable scheduling suite."
         breadcrumbs={[
           { label: 'Coordinator Portal', path: '/coordinator/dashboard' },
           { label: 'Operational Desk' },
         ]}
-        badge={<Badge variant="secondary">ACADEMIC COORD (L2)</Badge>}
+        badge={<Badge variant="secondary">TIME TABLE COORD (TC)</Badge>}
         actions={
           <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
             <Button
@@ -318,7 +318,7 @@ export default function CoordinatorDashboard() {
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
               <Badge variant="success">Step 3</Badge>
               <span style={{ fontWeight: 600 }}>Nominate Candidate Faculty Pools</span>
-              <span style={{ fontSize: '0.75rem', color: 'var(--color-outline)' }}>AC Recommendations</span>
+              <span style={{ fontSize: '0.75rem', color: 'var(--color-outline)' }}>TC Recommendations</span>
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
               <Badge variant="secondary">Step 4</Badge>

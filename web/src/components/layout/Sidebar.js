@@ -87,7 +87,7 @@ export default function Sidebar({
       case 'HOD':
         return <Badge variant="warning">HOD EXECUTIVE (L1)</Badge>;
       case 'AC':
-        return <Badge variant="secondary">ACADEMIC COORD (L2)</Badge>;
+        return <Badge variant="secondary">TIME TABLE COORD (TC)</Badge>;
       default:
         return <Badge variant="primary">FACULTY MEMBER</Badge>;
     }

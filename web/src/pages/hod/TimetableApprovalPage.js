@@ -128,7 +128,7 @@ export default function TimetableApprovalPage() {
                         {ver.year || 'CSE'} {ver.section ? `'${ver.section}'` : ''}
                       </td>
                       <td style={{ padding: '12px 16px', color: 'var(--color-on-surface-variant)' }}>
-                        {ver.generatedBy || 'Academic Coordinator'}
+                        {ver.generatedBy || 'TimeTable Coordinator'}
                       </td>
                       <td style={{ padding: '12px 16px' }}>
                         <Badge
