@@ -397,37 +397,77 @@ async function buildSchedulingContext(input = {}) {
   }
 
   // 6. Build Global Occupancy and Faculty Availability Maps
+  const mongoose = require('mongoose');
   const facultyUnavailableSet = new Set();
-  const unavailRecords = await FacultyAvailability.find({
-    facultyId: { $in: Array.from(facultyIdsSet) },
-    status: 'UNAVAILABLE',
-  });
+  let unavailRecords = [];
+  if (mongoose.connection.readyState === 1) {
+    try {
+      unavailRecords = await FacultyAvailability.find({
+        facultyId: { $in: Array.from(facultyIdsSet) },
+        status: 'UNAVAILABLE',
+      });
+    } catch (_) {}
+  }
   unavailRecords.forEach((u) => {
     facultyUnavailableSet.add(`${u.facultyId}_${u.day}_${u.period}`);
   });
 
   // Global Faculty Occupancy: sessions in other academic contexts or published versions
   const globalFacultyOccupancy = new Map();
-  const otherSessions = await TimetableSession.find({
-    academicContextId: { $ne: context._id },
-    facultyId: { $in: Array.from(facultyIdsSet) },
-  });
+  let otherSessions = [];
+
+  if (mongoose.connection.readyState === 1) {
+    try {
+      const activeVersions = await TimetableVersion.find({
+        status: { $in: ['PUBLISHED', 'APPROVED', 'GENERATED', 'SUBMITTED'] },
+      }).select('_id');
+      const activeVersionIds = activeVersions.map((v) => v._id);
+
+      otherSessions = await TimetableSession.find({
+        academicContextId: { $ne: context._id },
+        ...(activeVersionIds.length > 0 ? { timetableVersionId: { $in: activeVersionIds } } : {}),
+        $or: [
+          { facultyId: { $in: Array.from(facultyIdsSet) } },
+          { 'facultyAssignments.facultyId': { $in: Array.from(facultyIdsSet) } },
+        ],
+      }).lean();
+    } catch (err) {
+      console.warn('[constraintBuilder] DB query for external class sessions warning:', err.message);
+    }
+  } else {
+    try {
+      const { ALL_SESSIONS } = require('../../data/offlineFallbackData');
+      otherSessions = (ALL_SESSIONS || []).filter(
+        (s) => s.academicContextId && s.academicContextId.toString() !== context._id.toString()
+      );
+    } catch (_) {}
+  }
 
   otherSessions.forEach((s) => {
-    const key = `${s.facultyId}_${s.day}_${s.period}`;
-    globalFacultyOccupancy.set(key, {
-      courseCode: s.courseCode,
-      academicContextId: s.academicContextId,
-      sessionType: s.sessionType,
-    });
+    const fids = [s.facultyId, ...(s.facultyAssignments || []).map((a) => a.facultyId)].filter(Boolean);
+    for (const fid of fids) {
+      if (facultyIdsSet.has(fid)) {
+        const key = `${fid}_${s.day}_${s.period}`;
+        globalFacultyOccupancy.set(key, {
+          academicContextId: s.academicContextId,
+          courseCode: s.courseCode,
+          sessionType: s.sessionType,
+        });
+      }
+    }
   });
 
   // Existing sessions for THIS class (e.g. if locked or if preserving non-course sessions like Library/Sports)
   const existingClassOccupancy = new Map();
-  const existingClassSessions = await TimetableSession.find({
-    timetableVersionId: version._id,
-    academicContextId: context._id,
-  });
+  let existingClassSessions = [];
+  if (mongoose.connection.readyState === 1) {
+    try {
+      existingClassSessions = await TimetableSession.find({
+        timetableVersionId: version._id,
+        academicContextId: context._id,
+      });
+    } catch (_) {}
+  }
 
   // Check if any existing sessions are locked non-teaching sessions (e.g., mentor, library, sports)
   // For generation, standard curriculum theory and lab sessions are replaced cleanly by the solver.

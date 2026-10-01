@@ -16,6 +16,8 @@ const {
   getValidLabBlocksForDay,
   isMorningBlock,
   isAfternoonBlock,
+  MORNING_PERIODS,
+  AFTERNOON_PERIODS,
 } = require('./timetableGrid');
 
 /**
@@ -28,7 +30,7 @@ function wouldCreateThreeConsecutiveTheory(day, period, courseCode, classOccupan
   const getCourseAt = (pIndex) => {
     if (pIndex < 0 || pIndex >= allPeriods.length) return null;
     const p = allPeriods[pIndex];
-    const session = classOccupancy.get(`${day}_${p}`);
+    const session = classOccupancy instanceof Map ? classOccupancy.get(`${day}_${p}`) : classOccupancy?.[`${day}_${p}`];
     return session ? session.courseCode : null;
   };
 
@@ -47,6 +49,34 @@ function wouldCreateThreeConsecutiveTheory(day, period, courseCode, classOccupan
   if (next1 === courseCode && next2 === courseCode) return true;
 
   return false;
+}
+
+/**
+ * Checks whether placing courseCode at period on day would fill an entire session (morning or afternoon).
+ * Requirement 1: Never fill an entire morning, afternoon, or evening/session with the same theory subject.
+ */
+function wouldFillEntireSession(day, period, courseCode, classOccupancy, allPeriods) {
+  const morningList = allPeriods.filter((p) => MORNING_PERIODS.includes(p));
+  const afternoonList = allPeriods.filter((p) => AFTERNOON_PERIODS.includes(p));
+
+  const isMorning = morningList.includes(period);
+  const targetSessionPeriods = isMorning ? morningList : afternoonList;
+
+  if (targetSessionPeriods.length === 0) return false;
+
+  let count = 0;
+  for (const p of targetSessionPeriods) {
+    if (p === period) {
+      count++;
+    } else {
+      const session = classOccupancy instanceof Map ? classOccupancy.get(`${day}_${p}`) : classOccupancy?.[`${day}_${p}`];
+      if (session && session.courseCode === courseCode) {
+        count++;
+      }
+    }
+  }
+
+  return count >= targetSessionPeriods.length;
 }
 
 /**
@@ -155,10 +185,12 @@ function generateTheoryCandidates(variable, state, context) {
       ? variable.facultyAssignments.map((a) => a.facultyId)
       : [variable.facultyId].filter(Boolean);
 
+  // Adaptive daily concentration safeguard (max 2 per day for standard courses, scales dynamically if total periods > 2 * days)
+  const maxPerDay = Math.max(2, Math.ceil((variable.totalPeriod || 3) / Math.max(1, days.length)));
+
   for (const day of days) {
-    // Session concentration safeguard: if course already has >= 2 periods on this day, avoid 3rd
     const currentDayCount = getCourseCountOnDay(day, variable.courseCode, classOccupancy, periods);
-    if (currentDayCount >= 2) {
+    if (currentDayCount >= maxPerDay) {
       continue;
     }
 
@@ -186,6 +218,11 @@ function generateTheoryCandidates(variable, state, context) {
 
       // 4. Theory consecutive rule: must not create >= 3 consecutive periods of same course
       if (wouldCreateThreeConsecutiveTheory(day, period, variable.courseCode, classOccupancy, periods)) {
+        continue;
+      }
+
+      // 5. Theory session rule: must not fill an entire morning or afternoon session
+      if (wouldFillEntireSession(day, period, variable.courseCode, classOccupancy, periods)) {
         continue;
       }
 
@@ -221,10 +258,22 @@ function generateCandidatesForVariable(variable, state, context) {
   return generateTheoryCandidates(variable, state, context);
 }
 
+const {
+  isFacultyAvailable,
+  isClassPeriodAvailable,
+  isTheoryPlacementValid,
+  isLabPlacementValid,
+} = require('./timetableCoreLogic');
+
 module.exports = {
   generateLabCandidates,
   generateTheoryCandidates,
   generateCandidatesForVariable,
   wouldCreateThreeConsecutiveTheory,
+  wouldFillEntireSession,
   getCourseCountOnDay,
+  isFacultyAvailable,
+  isClassPeriodAvailable,
+  isTheoryPlacementValid,
+  isLabPlacementValid,
 };

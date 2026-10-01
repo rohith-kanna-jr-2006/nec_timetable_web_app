@@ -113,6 +113,10 @@ export async function getMe() {
  * Retrieve current user profile (tries remote /api/auth/me first, falls back to stored profile)
  */
 export async function getCurrentUser() {
+  const token = getAuthToken ? getAuthToken() : null;
+  if (!token) {
+    return getStoredUser();
+  }
   try {
     return await getMe();
   } catch {

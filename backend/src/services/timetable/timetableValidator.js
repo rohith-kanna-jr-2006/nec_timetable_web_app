@@ -124,6 +124,18 @@ function validateGeneratedSchedule(assignments, problemSpec) {
     labSessions.sort((a, b) => periods.indexOf(a.period) - periods.indexOf(b.period));
     const blockPeriods = labSessions.map((s) => s.period);
 
+    // Exactly 4 periods check
+    if (blockPeriods.length !== 4) {
+      errors.push({
+        code: 'LAB_NOT_FOUR_PERIODS',
+        key,
+        courseCode: labSessions[0].courseCode,
+        day: labSessions[0].day,
+        periods: blockPeriods,
+        message: `Laboratory block for '${key}' must occupy exactly 4 continuous periods (found ${blockPeriods.length}).`,
+      });
+    }
+
     // Continuity check
     if (!arePeriodsConsecutive(blockPeriods, periods)) {
       errors.push({
@@ -189,6 +201,51 @@ function validateGeneratedSchedule(assignments, problemSpec) {
           periods: [periods[i], periods[i + 1], periods[i + 2]],
           message: `Theory subject '${s1.courseCode}' violates the consecutive rule with 3 continuous periods on ${day} (${periods[i]}, ${periods[i + 1]}, ${periods[i + 2]}).`,
         });
+      }
+    }
+  }
+
+  // 6b. Check: Theory subject never fills an entire session (morning or afternoon)
+  const { MORNING_PERIODS, AFTERNOON_PERIODS } = require('./timetableGrid');
+  const morningList = periods.filter((p) => MORNING_PERIODS.includes(p));
+  const afternoonList = periods.filter((p) => AFTERNOON_PERIODS.includes(p));
+
+  for (const day of days) {
+    if (morningList.length > 0) {
+      const morningCourses = morningList
+        .map((p) => classOccupancy.get(`${day}_${p}`))
+        .filter((s) => s && s.sessionType !== 'LAB');
+
+      if (morningCourses.length === morningList.length) {
+        const firstCode = morningCourses[0].courseCode;
+        if (morningCourses.every((s) => s.courseCode === firstCode)) {
+          errors.push({
+            code: 'THEORY_FILLS_ENTIRE_SESSION',
+            day,
+            session: 'MORNING',
+            courseCode: firstCode,
+            message: `Theory subject '${firstCode}' fills the entire morning session on ${day}.`,
+          });
+        }
+      }
+    }
+
+    if (afternoonList.length > 0) {
+      const afternoonCourses = afternoonList
+        .map((p) => classOccupancy.get(`${day}_${p}`))
+        .filter((s) => s && s.sessionType !== 'LAB');
+
+      if (afternoonCourses.length === afternoonList.length) {
+        const firstCode = afternoonCourses[0].courseCode;
+        if (afternoonCourses.every((s) => s.courseCode === firstCode)) {
+          errors.push({
+            code: 'THEORY_FILLS_ENTIRE_SESSION',
+            day,
+            session: 'AFTERNOON',
+            courseCode: firstCode,
+            message: `Theory subject '${firstCode}' fills the entire afternoon session on ${day}.`,
+          });
+        }
       }
     }
   }
@@ -268,4 +325,5 @@ function validateGeneratedSchedule(assignments, problemSpec) {
 
 module.exports = {
   validateGeneratedSchedule,
+  validateTimetable: validateGeneratedSchedule,
 };

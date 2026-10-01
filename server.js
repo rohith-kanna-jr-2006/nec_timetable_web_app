@@ -13,7 +13,7 @@ const { execSync } = require('child_process');
 const app = require('./backend/src/app');
 const { connectDB, disconnectDB } = require('./backend/src/config/db');
 
-const PORT = process.env.PORT || 3000;
+const PORT = 3000;
 const HOST = '0.0.0.0';
 
 // Ensure frontend assets are built if missing

@@ -320,6 +320,29 @@ async function solveTimetable(problemSpec, options = {}) {
   }
 }
 
+const {
+  isFacultyAvailable,
+  isClassPeriodAvailable,
+  isTheoryPlacementValid,
+  isLabPlacementValid,
+  wouldFillEntireSession,
+  generateLabSchedule,
+  generateTheorySchedule,
+  validateTimetable,
+  generateFacultyTimetable,
+  generateClassTimetable,
+} = require('./timetableCoreLogic');
+
 module.exports = {
   solveTimetable,
+  isFacultyAvailable,
+  isClassPeriodAvailable,
+  isTheoryPlacementValid,
+  isLabPlacementValid,
+  wouldFillEntireSession,
+  generateLabSchedule,
+  generateTheorySchedule,
+  validateTimetable,
+  generateFacultyTimetable,
+  generateClassTimetable,
 };

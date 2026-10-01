@@ -104,7 +104,7 @@ async function request(endpoint, options = {}) {
       error.data = data;
 
       // Handle 401 Unauthorized / Token Expired automatically
-      if (response.status === 401 && !endpoint.includes('/auth/login')) {
+      if (response.status === 401 && !endpoint.includes('/auth/login') && !endpoint.includes('/auth/me')) {
         console.warn('[API Client] Session expired or invalid token (401). Clearing session.');
         clearAuthSession();
         if (typeof window !== 'undefined' && !window.location.pathname.startsWith('/login')) {

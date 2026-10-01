@@ -30,11 +30,35 @@ async function getContexts(req, res, next) {
 }
 
 /**
+ * Get active academic context
+ * GET /api/academic-contexts/active
+ */
+async function getActiveContext(req, res, next) {
+  try {
+    const mongoose = require('mongoose');
+    let context = null;
+    if (mongoose.connection.readyState === 1) {
+      context = await AcademicContext.findOne({ status: 'ACTIVE' });
+    }
+    if (!context) {
+      const { DEFAULT_ACTIVE_CONTEXT } = require('../data/offlineFallbackData');
+      return successResponse(res, DEFAULT_ACTIVE_CONTEXT);
+    }
+    return successResponse(res, context);
+  } catch (error) {
+    next(error);
+  }
+}
+
+/**
  * Get single context by ID
  * GET /api/academic-contexts/:id
  */
 async function getContextById(req, res, next) {
   try {
+    if (req.params.id === 'active') {
+      return getActiveContext(req, res, next);
+    }
     const context = await AcademicContext.findById(req.params.id);
     if (!context) {
       return errorResponse(res, 'Academic context not found', 404, 'NOT_FOUND');
@@ -127,6 +151,7 @@ async function deleteContext(req, res, next) {
 module.exports = {
   getContexts,
   getContextById,
+  getActiveContext,
   createContext,
   updateContext,
   deleteContext,
