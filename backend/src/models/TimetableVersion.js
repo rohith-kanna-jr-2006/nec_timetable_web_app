@@ -69,6 +69,12 @@ const timetableVersionSchema = new mongoose.Schema(
       type: String,
       default: null,
     },
+    // Phase 5: recorded when the TC submits a GENERATED version for HOD approval.
+    // Optional field — pre-Phase 5 documents simply keep null and need no migration.
+    submittedAt: {
+      type: Date,
+      default: null,
+    },
     approvedBy: {
       type: String,
       default: null,

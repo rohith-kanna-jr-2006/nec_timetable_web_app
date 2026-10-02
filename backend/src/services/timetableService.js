@@ -104,12 +104,29 @@ async function transitionTimetableStatus(versionId, targetStatus, user, meta = {
     throw err;
   }
 
+  // Phase 5: submitting a timetable for HOD approval is the single most
+  // consequential TC action in the workflow.  Before the version becomes a
+  // frozen review artifact it must clear the submission gate (sessions exist,
+  // context is intact, HOD allocations unchanged, hard constraints intact).
+  // Imported lazily to keep the module graph acyclic and the hot path cheap.
+  let submissionReview = null;
+  if (targetStatus === 'PENDING_HOD_APPROVAL') {
+    // eslint-disable-next-line global-require
+    const { validateVersionForHodSubmission } = require('./timetableSubmissionService');
+    submissionReview = await validateVersionForHodSubmission({
+      versionId,
+      academicContextId: meta.academicContextId,
+      user,
+    });
+  }
+
   version.status = targetStatus;
 
   if (targetStatus === 'GENERATED') {
     version.generatedBy = user.name || user.email;
   } else if (targetStatus === 'PENDING_HOD_APPROVAL') {
     version.submittedBy = user.name || user.email;
+    version.submittedAt = new Date();
   } else if (targetStatus === 'APPROVED') {
     version.approvedBy = user.name || user.email;
     version.approvedAt = new Date();
@@ -118,9 +135,19 @@ async function transitionTimetableStatus(versionId, targetStatus, user, meta = {
     version.publishedAt = new Date();
   } else if (targetStatus === 'REJECTED') {
     version.rejectionReason = meta.rejectionReason || 'Rejected by HOD';
+    // Phase 5: a rejected version returns to the TC as an editable artifact.
+    // Clearing the submission stamps keeps the revision history honest — the
+    // REJECTED -> GENERATED -> PENDING_HOD_APPROVAL cycle re-stamps on submit.
+    version.submittedBy = null;
+    version.submittedAt = null;
   }
 
   await version.save();
+
+  if (submissionReview) {
+    version.submissionReview = submissionReview;
+  }
+
   return version;
 }
 
@@ -143,8 +170,9 @@ async function solveAndPersistTimetable(input, user = {}) {
 
   const { version, context, allVariables } = problemSpec;
 
-  // Published / Approved immutability guard
-  if (version && ['PUBLISHED', 'APPROVED'].includes(version.status)) {
+  // Published / Approved / Submitted immutability guard (Phase 5 adds
+  // PENDING_HOD_APPROVAL: a submitted version is a frozen review artifact).
+  if (version && ['PUBLISHED', 'APPROVED', 'PENDING_HOD_APPROVAL'].includes(version.status)) {
     return {
       success: false,
       code: 'VERSION_LOCKED',
@@ -378,6 +406,52 @@ async function getClassSchedule(academicContextId, versionId = null) {
 }
 
 /**
+ * Phase 4 rollback helper.
+ *
+ * When a generation run has to create a brand-new working TimetableVersion but
+ * the solve or the persist step fails, that version must not survive.  A
+ * leftover version would make the TC design context report a generated
+ * timetable that has zero sessions and would break the Phase 1/2 lifecycle.
+ *
+ * Pre-existing versions are always preserved — the TC may legitimately be
+ * iterating on a DRAFT version.
+ *
+ * @param {Object} version                 - Resolved TimetableVersion (or null)
+ * @param {boolean} createdByThisRun       - True when this run created the version
+ * @returns {Promise<{keptVersionId: string|null, keptStatus: string|null}>}
+ */
+async function _discardVersionIfCreatedByThisRun(version, createdByThisRun) {
+  if (!createdByThisRun || !version) {
+    return {
+      keptVersionId: version ? version._id : null,
+      keptStatus: version ? version.status : null,
+    };
+  }
+
+  try {
+    const mongoose = require('mongoose');
+    if (mongoose.connection.readyState !== 1) {
+      return { keptVersionId: null, keptStatus: null };
+    }
+
+    // Only remove a version that is still empty; never delete real timetable data.
+    const sessionCount = await TimetableSession.countDocuments({
+      timetableVersionId: version._id,
+    });
+
+    if (sessionCount === 0) {
+      await TimetableVersion.findByIdAndDelete(version._id);
+      return { keptVersionId: null, keptStatus: null };
+    }
+
+    return { keptVersionId: version._id, keptStatus: version.status };
+  } catch (_) {
+    // Rollback is best-effort; never mask the original generation failure.
+    return { keptVersionId: version._id, keptStatus: version.status };
+  }
+}
+
+/**
  * Solves timetable using the Phase 4 server-derived design context path.
  *
  * Preferred generation pathway:
@@ -400,10 +474,11 @@ async function solveFromDesignContext(input, user = {}) {
     ...input.options,
   };
 
-  const { version, context, allVariables, _designContext } = problemSpec;
+  const { version, context, allVariables, _designContext, versionCreatedByThisRun } = problemSpec;
 
-  // Published / Approved immutability guard
-  if (version && ['PUBLISHED', 'APPROVED'].includes(version.status)) {
+  // Published / Approved / Submitted immutability guard (Phase 5 adds
+  // PENDING_HOD_APPROVAL: a submitted version is a frozen review artifact).
+  if (version && ['PUBLISHED', 'APPROVED', 'PENDING_HOD_APPROVAL'].includes(version.status)) {
     return {
       success: false,
       code: 'VERSION_LOCKED',
@@ -419,11 +494,15 @@ async function solveFromDesignContext(input, user = {}) {
   const solution = await solveTimetable(problemSpec, solverOptions);
 
   if (!solution.success) {
+    // Phase 4: a working version created for this failed run must not survive.
+    // Leaving a version behind would misreport readiness to the TC screen and
+    // break the Phase 1 governance state machine.
+    const rollback = await _discardVersionIfCreatedByThisRun(version, versionCreatedByThisRun);
     return {
       ...solution,
       academicContextId: context ? context._id : null,
-      timetableVersionId: version ? version._id : null,
-      status: version ? version.status : null,
+      timetableVersionId: rollback.keptVersionId,
+      status: rollback.keptStatus,
       sessionsCreated: 0,
       sessions: [],
       designContext: _designContext,
@@ -433,13 +512,14 @@ async function solveFromDesignContext(input, user = {}) {
   // Zero-session safety
   const requiredPeriods = (allVariables && allVariables.length) || 0;
   if (requiredPeriods > 0 && (!solution.sessions || solution.sessions.length === 0)) {
+    const rollback = await _discardVersionIfCreatedByThisRun(version, versionCreatedByThisRun);
     return {
       success: false,
       code: 'ZERO_SESSIONS_GENERATED',
       message: `Solver completed but produced zero scheduled sessions when ${requiredPeriods} periods were required.`,
       academicContextId: context ? context._id : null,
-      timetableVersionId: version ? version._id : null,
-      status: version ? version.status : null,
+      timetableVersionId: rollback.keptVersionId,
+      status: rollback.keptStatus,
       sessionsCreated: 0,
       sessions: [],
       diagnostics: solution.diagnostics,

@@ -14,6 +14,15 @@ const {
 const { ConstraintBuilderError } = require('../services/timetable/constraintBuilder');
 const { getAcademicContextWorkflowStatus } = require('../services/contextStatusService');
 const { getTCTimetableDesignContext } = require('../services/tcDesignContextService');
+const {
+  buildReviewSummary,
+  buildReviewSessions,
+} = require('../services/timetableReviewService');
+const {
+  TimetableSubmissionError,
+  isVersionSubmissionLocked,
+  isVersionSubmittedForApproval,
+} = require('../services/timetableSubmissionService');
 const { successResponse, errorResponse } = require('../utils/responseHandler');
 
 // ---------------------------------------------------------------------------
@@ -51,6 +60,7 @@ function _versionSummary(v) {
     section: v.section,
     generatedBy: v.generatedBy,
     submittedBy: v.submittedBy,
+    submittedAt: v.submittedAt || null,
     approvedBy: v.approvedBy,
     totalScheduledPeriods: v.totalScheduledPeriods,
   };
@@ -101,6 +111,58 @@ async function _versionBelongsToContext(version, context) {
 }
 
 /**
+ * Canonical single-version detail payload (Phase 5).
+ *
+ * Exposes exactly the workflow metadata the TC/HOD review screens need and
+ * nothing else — no mongoose internals (__v, raw 5-field duplicates).
+ */
+function _versionDetail(v) {
+  if (!v) return null;
+  const contextDoc =
+    v.academicContextId && typeof v.academicContextId === 'object' && v.academicContextId.semester
+      ? v.academicContextId
+      : null;
+
+  return {
+    _id: v._id,
+    id: v._id,
+    academicContextId: contextDoc ? contextDoc._id : v.academicContextId || null,
+    academicContext: contextDoc
+      ? {
+          id: contextDoc._id,
+          academicYear: contextDoc.academicYear,
+          semester: contextDoc.semester,
+          department: contextDoc.department,
+          year: contextDoc.year,
+          section: contextDoc.section,
+          program: contextDoc.program,
+          status: contextDoc.status,
+        }
+      : null,
+    status: v.status,
+    version: v.version,
+    versionLabel: v.versionLabel,
+    academicYear: v.academicYear,
+    semester: v.semester,
+    department: v.department,
+    year: v.year,
+    section: v.section,
+    generatedBy: v.generatedBy || null,
+    submittedBy: v.submittedBy || null,
+    submittedAt: v.submittedAt || null,
+    approvedBy: v.approvedBy || null,
+    approvedAt: v.approvedAt || null,
+    publishedAt: v.publishedAt || null,
+    rejectionReason: v.rejectionReason || null,
+    hardConflicts: v.hardConflicts === undefined ? 0 : v.hardConflicts,
+    totalScheduledPeriods: v.totalScheduledPeriods === undefined ? 0 : v.totalScheduledPeriods,
+    editable: !isVersionSubmissionLocked(v.status),
+    createdAt: v.createdAt,
+    updatedAt: v.updatedAt,
+  };
+}
+
+/**
  * Get timetable versions
  * GET /api/timetable/versions
  * Supports: ?academicContextId= (Phase 2 primary filter)
@@ -113,6 +175,8 @@ async function getVersions(req, res, next) {
 
     // Phase 2: prefer academicContextId filter
     if (academicContextId) {
+      // Context scoping happens in the database, never in the client: sorting a
+      // global list and filtering afterwards would leak other cohorts' versions.
       query.academicContextId = academicContextId;
     } else {
       // Legacy 5-field filters
@@ -122,7 +186,14 @@ async function getVersions(req, res, next) {
     }
     if (status) query.status = status;
 
-    const versions = await TimetableVersion.find(query).sort({ createdAt: -1 });
+    // Repository ordering convention: newest working version first. `version`
+    // breaks ties between versions created inside the same millisecond so
+    // ordering never depends on a stale `v1.0` label.
+    const versions = await TimetableVersion.find(query).sort({
+      createdAt: -1,
+      version: -1,
+      _id: -1,
+    });
     return successResponse(res, versions);
   } catch (error) {
     next(error);
@@ -136,11 +207,14 @@ async function getVersions(req, res, next) {
  */
 async function getVersionById(req, res, next) {
   try {
-    const version = await TimetableVersion.findById(req.params.id).populate('academicContextId', 'academicYear semester department year section program status');
+    const version = await TimetableVersion.findById(req.params.id).populate(
+      'academicContextId',
+      'academicYear semester department year section program status'
+    );
     if (!version) {
-      return errorResponse(res, 'Timetable version not found', 404, 'NOT_FOUND');
+      return errorResponse(res, 'Timetable version not found', 404, 'VERSION_NOT_FOUND');
     }
-    return successResponse(res, version);
+    return successResponse(res, _versionDetail(version));
   } catch (error) {
     next(error);
   }
@@ -212,19 +286,42 @@ async function createVersion(req, res, next) {
 /**
  * Transition timetable version status
  * PATCH /api/timetable/version/:id/status
+ *
+ * Phase 5: GENERATED -> PENDING_HOD_APPROVAL is the TC submission path. It
+ * reuses this endpoint (no duplicate /submit-timetable API) and answers with the
+ * full TC review payload so the review screen can confirm exactly what was
+ * sent. `academicContextId` may be supplied by the client to assert the context
+ * the TC believes it is submitting; a mismatch is rejected with HTTP 409.
  */
 async function transitionVersion(req, res, next) {
   try {
     const { id } = req.params;
-    const { status, rejectionReason } = req.body;
+    const { status, rejectionReason, academicContextId } = req.body;
 
     if (!status) {
       return errorResponse(res, 'Status is required', 400, 'BAD_REQUEST');
     }
 
-    const updated = await transitionTimetableStatus(id, status, req.user || {}, { rejectionReason });
-    return successResponse(res, updated);
+    const updated = await transitionTimetableStatus(id, status, req.user || {}, {
+      rejectionReason,
+      academicContextId,
+    });
+
+    // `submissionReview` is attached by the service as a non-schema property so
+    // the persisted TimetableVersion document stays exactly as modelled.
+    const submissionReview = updated.submissionReview;
+    const payload = typeof updated.toObject === 'function' ? updated.toObject() : updated;
+
+    return successResponse(res, {
+      ...payload,
+      ...(submissionReview ? { submission: _submissionSummary(submissionReview) } : {}),
+    });
   } catch (error) {
+    // Phase 5: the submission gate owns every pre-submit rejection reason and
+    // already carries the correct HTTP status + structured error code.
+    if (error instanceof TimetableSubmissionError || error.name === 'TimetableSubmissionError') {
+      return errorResponse(res, error.message, error.statusCode || 409, error.code, error.details);
+    }
     // Service-layer authorization errors carry statusCode + code.
     if (error.statusCode === 403 || error.code === 'STATE_TRANSITION_ERROR') {
       return errorResponse(res, error.message, 403, 'STATE_TRANSITION_ERROR');
@@ -238,16 +335,75 @@ async function transitionVersion(req, res, next) {
 }
 
 /**
+ * Condenses a submission-gate review into the response body attached to a
+ * successful GENERATED -> PENDING_HOD_APPROVAL transition.
+ */
+function _submissionSummary(review) {
+  return {
+    academicContextId: review.academicContextId,
+    timetableVersionId: review.timetableVersionId,
+    sessionCount: review.sessionCount,
+    summary: review.summary,
+    validation: {
+      isValid: review.validation.isValid,
+      checkedRequirementCount: review.validation.checkedRequirementCount,
+      warningCount: review.validation.warningCount,
+    },
+  };
+}
+
+/**
  * Get schedule for a faculty member
  * GET /api/timetable/faculty/:facultyId
+ *
+ * Public default (no versionId): PUBLISHED versions only — behaviour unchanged.
+ * Phase 5: an explicit versionId is an internal TC/HOD review request and
+ * returns exactly that version's sessions where this faculty is the primary
+ * instructor OR appears in facultyAssignments[] (LAB ADDITIONAL/OPTIONAL,
+ * SAS MATHS_BME/ENGLISH). One class session stays one session.
  */
 async function getFacultyTimetable(req, res, next) {
   try {
     const { facultyId } = req.params;
     const { versionId } = req.query;
 
+    let version = null;
+    if (versionId) {
+      version = await TimetableVersion.findById(versionId);
+      if (!version) {
+        return errorResponse(res, 'Timetable version not found', 404, 'VERSION_NOT_FOUND');
+      }
+    }
+
     const sessions = await getFacultySchedule(facultyId, versionId);
-    return successResponse(res, { facultyId, sessionCount: sessions.length, sessions });
+
+    const roles = new Set();
+    const facultyIds = new Set();
+    for (const s of sessions) {
+      const assignments = Array.isArray(s.facultyAssignments) ? s.facultyAssignments : [];
+      assignments.forEach((a) => {
+        if (a && a.facultyId) facultyIds.add(a.facultyId);
+      });
+      assignments
+        .filter((a) => a && a.facultyId === facultyId)
+        .forEach((a) => roles.add(a.role || 'PRIMARY'));
+      if (s.facultyId === facultyId) {
+        facultyIds.add(facultyId);
+        roles.add('PRIMARY');
+      }
+    }
+
+    return successResponse(res, {
+      facultyId,
+      timetableVersionId: version ? version._id : null,
+      timetableVersion: version ? _versionSummary(version) : null,
+      status: version ? version.status : null,
+      isInternalReview: Boolean(versionId),
+      sessionCount: sessions.length,
+      facultyCount: facultyIds.size,
+      roles: Array.from(roles),
+      sessions,
+    });
   } catch (error) {
     next(error);
   }
@@ -274,7 +430,7 @@ async function getClassTimetable(req, res, next) {
     if (versionId) {
       const requestedVersion = await TimetableVersion.findById(versionId);
       if (!requestedVersion) {
-        return errorResponse(res, 'Timetable version not found', 404, 'NOT_FOUND');
+        return errorResponse(res, 'Timetable version not found', 404, 'VERSION_NOT_FOUND');
       }
       // Validate: version must belong to this context
       const versionOwnsContext = requestedVersion.academicContextId
@@ -288,15 +444,20 @@ async function getClassTimetable(req, res, next) {
           'TIMETABLE_VERSION_CONTEXT_MISMATCH'
         );
       }
-      // Serve this explicit version (authenticated internal review)
+      // Serve this exact version (authenticated internal TC/HOD review).
+      // Never substitute a "newer" version — the TC reviews what was generated.
       const sessions = await getClassSchedule(academicContextId, versionId);
       return successResponse(res, {
         academicContextId: context._id,
         academicContext: _contextSummary(context),
         isPublished: requestedVersion.status === 'PUBLISHED',
+        isInternalReview: true,
         timetableVersionId: requestedVersion._id,
+        versionId: requestedVersion._id,
         timetableVersion: _versionSummary(requestedVersion),
+        status: requestedVersion.status,
         sessionCount: sessions.length,
+        summary: buildReviewSummary(sessions),
         sessions,
       });
     }
@@ -434,33 +595,21 @@ async function getReviewMatrix(req, res, next) {
       sessionQuery.timetableVersionId = version._id;
     }
 
-    const rawSessions = await TimetableSession.find(sessionQuery)
-      .sort({ day: 1, period: 1 })
-      .lean();
+    const rawSessions = await TimetableSession.find(sessionQuery).lean();
 
-    // Populate and ensure canonical Course & Faculty metadata
-    const sessions = await Promise.all(
-      rawSessions.map(async (s) => {
-        let canonicalCourseName = s.courseName;
-        if (s.courseCode) {
-          const crs = await Course.findOne({ courseCode: s.courseCode });
-          if (crs) canonicalCourseName = crs.courseName;
-        }
-        return {
-          ...s,
-          courseName: canonicalCourseName,
-          academicContextId: s.academicContextId ? s.academicContextId.toString() : null,
-          timetableVersionId: s.timetableVersionId ? s.timetableVersionId.toString() : null,
-        };
-      })
-    );
+    // One batched session query + one batched course query. The previous
+    // implementation issued one Course lookup per session (N+1).
+    const sessions = await buildReviewSessions(rawSessions);
 
     return successResponse(res, {
       academicContextId: context ? context._id : null,
       academicContext: context ? _contextSummary(context) : null,
       timetableVersionId: version ? version._id : null,
       timetableVersion: version ? _versionSummary(version) : null,
+      status: version ? version.status : null,
+      isInternalReview: Boolean(targetVersionId),
       sessionCount: sessions.length,
+      summary: buildReviewSummary(sessions),
       sessions,
     });
   } catch (error) {
@@ -603,6 +752,25 @@ async function createSession(req, res, next) {
 
     const finalVersionId = version._id;
     const finalContextId = context._id;
+
+    // Phase 5: once GENERATED -> PENDING_HOD_APPROVAL the version becomes a
+    // frozen review artifact. Mutating it would silently rewrite what the HOD
+    // is looking at. The sanctioned revision path is
+    // PENDING_HOD_APPROVAL -> REJECTED -> (new editable version) -> GENERATED
+    // -> PENDING_HOD_APPROVAL.
+    if (isVersionSubmittedForApproval(version.status)) {
+      return errorResponse(
+        res,
+        `Timetable version is ${version.status} and cannot be modified.`,
+        409,
+        'TIMETABLE_VERSION_NOT_EDITABLE',
+        {
+          timetableVersionId: finalVersionId,
+          academicContextId: finalContextId,
+          status: version.status,
+        }
+      );
+    }
 
     // 3. Resolve and validate Course
     const normalizedCourseCode = courseCode.toUpperCase().trim();
@@ -773,17 +941,42 @@ async function createSession(req, res, next) {
 /**
  * Delete a session from timetable
  * DELETE /api/timetable/session/:id
+ *
+ * Phase 5: a submitted version is immutable — the session is located first so
+ * the lock can be reported against the owning version rather than 404ing.
  */
 async function deleteSession(req, res, next) {
   try {
-    const session = await TimetableSession.findByIdAndDelete(req.params.id);
-    if (!session) {
+    const existing = await TimetableSession.findById(req.params.id);
+    if (!existing) {
       return errorResponse(res, 'Timetable session not found', 404, 'NOT_FOUND');
     }
 
-    await TimetableVersion.findByIdAndUpdate(session.timetableVersionId, {
-      $inc: { totalScheduledPeriods: -1 },
-    });
+    const owningVersion = existing.timetableVersionId
+      ? await TimetableVersion.findById(existing.timetableVersionId)
+      : null;
+
+    if (owningVersion && isVersionSubmittedForApproval(owningVersion.status)) {
+      return errorResponse(
+        res,
+        `Timetable version is ${owningVersion.status} and its sessions cannot be modified.`,
+        409,
+        'TIMETABLE_VERSION_NOT_EDITABLE',
+        {
+          timetableVersionId: owningVersion._id,
+          academicContextId: owningVersion.academicContextId,
+          status: owningVersion.status,
+        }
+      );
+    }
+
+    await TimetableSession.findByIdAndDelete(req.params.id);
+
+    if (owningVersion) {
+      await TimetableVersion.findByIdAndUpdate(owningVersion._id, {
+        $inc: { totalScheduledPeriods: -1 },
+      });
+    }
 
     return successResponse(res, { message: 'Timetable session deleted successfully' });
   } catch (error) {

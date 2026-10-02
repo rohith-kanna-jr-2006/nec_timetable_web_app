@@ -23,6 +23,16 @@ const YEAR_TO_SEMESTER = {
   'IV YEAR': 'Semester VII',
 };
 
+// Phase 5: once a version leaves the TC's hands it becomes a frozen review
+// artifact.  PENDING_HOD_APPROVAL is immutable for the TC: sessions may not be
+// added, removed or regenerated.  The only sanctioned revision path is
+// PENDING_HOD_APPROVAL -> REJECTED -> (new working version) -> GENERATED.
+const IMMUTABLE_VERSION_STATUSES = ['PUBLISHED', 'APPROVED', 'PENDING_HOD_APPROVAL'];
+
+// Working versions the generator may safely overwrite.
+const MUTABLE_VERSION_STATUSES = ['DRAFT', 'GENERATED', 'REJECTED', 'NO_TIMETABLE'];
+
+
 class ConstraintBuilderError extends Error {
   constructor(message, code, details = {}) {
     super(message);
@@ -88,7 +98,7 @@ async function buildSchedulingContext(input = {}) {
         { timetableVersionId }
       );
     }
-    if (['PUBLISHED', 'APPROVED'].includes(version.status)) {
+    if (IMMUTABLE_VERSION_STATUSES.includes(version.status)) {
       throw new ConstraintBuilderError(
         `Timetable version '${version.versionLabel}' is ${version.status} and cannot be modified.`,
         'VERSION_LOCKED',
@@ -100,7 +110,7 @@ async function buildSchedulingContext(input = {}) {
     // then fall back to 5-field legacy match for backward compat.
     version = await TimetableVersion.findOne({
       academicContextId: context._id,
-      status: { $nin: ['PUBLISHED', 'APPROVED'] },
+      status: { $in: MUTABLE_VERSION_STATUSES },
     }).sort({ createdAt: -1 });
 
     if (!version) {
@@ -111,7 +121,7 @@ async function buildSchedulingContext(input = {}) {
         department: context.department,
         year: context.year,
         section: context.section,
-        status: { $nin: ['PUBLISHED', 'APPROVED'] },
+        status: { $in: MUTABLE_VERSION_STATUSES },
       }).sort({ createdAt: -1 });
 
       if (version && !version.academicContextId) {
@@ -604,6 +614,78 @@ function validateAssignmentPlanAgainstDesign(assignmentPlan, designContext) {
 }
 
 /**
+ * Converts a Phase 3 TC Design Context payload into solver requirements.
+ *
+ * Phase 5 needs the exact same Course → Faculty → Period mapping the solver
+ * uses, so that the TC submission gate can validate a generated version
+ * against authoritative HOD data without re-deriving (and drifting from)
+ * the generation rules.
+ *
+ * @param {Object} designData          - getTCTimetableDesignContext() .data
+ * @param {string} academicContextId   - Context anchor used in error details
+ * @returns {{resolvedRequirements: Array, facultyIdsSet: Set, schedulableCourses: Array}}
+ */
+function resolveRequirementsFromDesignData(designData, academicContextId) {
+  const resolvedRequirements = [];
+  const facultyIdsSet = new Set();
+
+  const courses = (designData && designData.courses) || [];
+
+  // Filter courses that are eligible for scheduling
+  const schedulableCourses = courses.filter((c) => {
+    // MC_OPTIONAL_MAPPING with OPTIONAL_NOT_MAPPED should be excluded
+    if (c.allocationRule === 'MC_OPTIONAL_MAPPING' && c.allocationStatus === 'OPTIONAL_NOT_MAPPED') {
+      return false;
+    }
+    // Only schedule courses that are timetable-eligible
+    return c.timetableEligible;
+  });
+
+  for (const course of schedulableCourses) {
+    const isLab = course.sessionType === 'LAB' || course.courseType === 'LAB';
+    const totalPeriod = course.requiredPeriods;
+    const labBlockSize = isLab ? (course.P || totalPeriod || 4) : 1;
+
+    // Build faculty assignments from the design context's authoritative data
+    const validAssignments = (course.facultyAssignments || []).filter((fa) => fa.valid !== false);
+
+    if (validAssignments.length === 0) {
+      throw new ConstraintBuilderError(
+        `Course '${course.courseCode}' (${course.courseName}) has no valid faculty assignment.`,
+        'HOD_ALLOCATION_REQUIRED',
+        { courseCode: course.courseCode, courseName: course.courseName, academicContextId }
+      );
+    }
+
+    const primaryFacultyId = validAssignments[0].facultyId;
+    const primaryFacultyName = validAssignments[0].facultyName || '';
+
+    validAssignments.forEach((fa) => facultyIdsSet.add(fa.facultyId));
+
+    const resolvedFacultyAssignments = validAssignments.map((fa) => ({
+      facultyId: fa.facultyId,
+      facultyName: fa.facultyName || '',
+      role: fa.role || 'PRIMARY',
+    }));
+
+    resolvedRequirements.push({
+      courseCode: course.courseCode,
+      courseName: course.courseName,
+      facultyId: primaryFacultyId,
+      facultyName: primaryFacultyName,
+      facultyAssignments: resolvedFacultyAssignments,
+      isLab,
+      totalPeriod,
+      labBlockSize,
+      sessionType: isLab ? 'LAB' : (course.courseType || 'THEORY'),
+      room: isLab ? (course.department === 'CSE' ? 'Systems Lab' : 'Laboratory') : 'LH-101',
+    });
+  }
+
+  return { resolvedRequirements, facultyIdsSet, schedulableCourses };
+}
+
+/**
  * Builds the scheduling problem spec using the Phase 3 TC Design Context
  * for authoritative, batched data resolution.
  *
@@ -680,8 +762,9 @@ async function buildSchedulingContextFromDesign(input = {}) {
     }
   }
 
-  // 4. Resolve or create TimetableVersion
+  // Phase 2/4: Resolve or create TimetableVersion
   let version = null;
+  let versionCreatedByThisRun = false;
   if (timetableVersionId) {
     version = await TimetableVersion.findById(timetableVersionId);
     if (!version) {
@@ -691,7 +774,7 @@ async function buildSchedulingContextFromDesign(input = {}) {
         { timetableVersionId }
       );
     }
-    if (['PUBLISHED', 'APPROVED'].includes(version.status)) {
+    if (IMMUTABLE_VERSION_STATUSES.includes(version.status)) {
       throw new ConstraintBuilderError(
         `Timetable version '${version.versionLabel}' is ${version.status} and cannot be modified.`,
         'VERSION_LOCKED',
@@ -712,18 +795,24 @@ async function buildSchedulingContextFromDesign(input = {}) {
     }
   } else {
     // Use the design context's current version or create a new one
-    if (designData.currentVersion && !['PUBLISHED', 'APPROVED'].includes(designData.currentVersion.status)) {
+    if (
+      designData.currentVersion &&
+      MUTABLE_VERSION_STATUSES.includes(designData.currentVersion.status)
+    ) {
       version = await TimetableVersion.findById(designData.currentVersion.id);
     }
 
     if (!version) {
       version = await TimetableVersion.findOne({
         academicContextId: context._id,
-        status: { $nin: ['PUBLISHED', 'APPROVED'] },
+        status: { $in: MUTABLE_VERSION_STATUSES },
       }).sort({ createdAt: -1 });
     }
 
     if (!version) {
+      // Create the working version as DRAFT.  It is promoted to GENERATED only
+      // after the solver succeeds and sessions persist, so a failed run can
+      // never leave a version falsely marked GENERATED with zero sessions.
       version = await TimetableVersion.create({
         academicContextId: context._id,
         academicYear: context.academicYear,
@@ -733,68 +822,45 @@ async function buildSchedulingContextFromDesign(input = {}) {
         section: context.section,
         version: 1,
         versionLabel: 'v1.0 (Auto-Generated)',
-        status: 'GENERATED',
+        status: 'DRAFT',
         generatedBy: 'Auto-Solver',
       });
+      versionCreatedByThisRun = true;
     }
   }
 
   const expectedSemester = designData.curriculumSemester;
 
-  // 5. Convert design context courses → solver requirements (zero N+1 queries)
-  const resolvedRequirements = [];
-  const facultyIdsSet = new Set();
-
-  // Filter courses that are eligible for scheduling
-  const schedulableCourses = designData.courses.filter((c) => {
-    // MC_OPTIONAL_MAPPING with OPTIONAL_NOT_MAPPED should be excluded
-    if (c.allocationRule === 'MC_OPTIONAL_MAPPING' && c.allocationStatus === 'OPTIONAL_NOT_MAPPED') {
-      return false;
-    }
-    // Only schedule courses that are timetable-eligible
-    return c.timetableEligible;
-  });
-
-  for (const course of schedulableCourses) {
-    const isLab = course.sessionType === 'LAB' || course.courseType === 'LAB';
-    const totalPeriod = course.requiredPeriods;
-    const labBlockSize = isLab ? (course.P || totalPeriod || 4) : 1;
-
-    // Build faculty assignments from the design context's authoritative data
-    const validAssignments = course.facultyAssignments.filter((fa) => fa.valid !== false);
-
-    if (validAssignments.length === 0) {
-      throw new ConstraintBuilderError(
-        `Course '${course.courseCode}' (${course.courseName}) has no valid faculty assignment.`,
-        'HOD_ALLOCATION_REQUIRED',
-        { courseCode: course.courseCode, courseName: course.courseName, academicContextId }
-      );
-    }
-
-    const primaryFacultyId = validAssignments[0].facultyId;
-    const primaryFacultyName = validAssignments[0].facultyName || '';
-
-    validAssignments.forEach((fa) => facultyIdsSet.add(fa.facultyId));
-
-    const resolvedFacultyAssignments = validAssignments.map((fa) => ({
-      facultyId: fa.facultyId,
-      facultyName: fa.facultyName || '',
-      role: fa.role || 'PRIMARY',
-    }));
-
-    resolvedRequirements.push({
-      courseCode: course.courseCode,
-      courseName: course.courseName,
-      facultyId: primaryFacultyId,
-      facultyName: primaryFacultyName,
-      facultyAssignments: resolvedFacultyAssignments,
-      isLab,
-      totalPeriod,
-      labBlockSize,
-      sessionType: isLab ? 'LAB' : (course.courseType || 'THEORY'),
-      room: isLab ? (course.category === 'CSE' ? 'Systems Lab' : 'Laboratory') : 'LH-101',
-    });
+  // 5. Elective governance gate.
+  // The legacy builder refuses to generate until the HOD has filled every
+  // R22 elective slot.  The design path must enforce the same rule, otherwise
+  // Phase 4 would silently generate a timetable that is missing the electives
+  // the curriculum requires.
+  const electiveSelection = designData.electiveSelection || {};
+  const electiveSlots = Array.isArray(electiveSelection.electiveSlots)
+    ? electiveSelection.electiveSlots
+    : [];
+  if (electiveSlots.length > 0 && electiveSelection.isElectiveComplete === false) {
+    throw new ConstraintBuilderError(
+      `Cohort requires ${electiveSlots.length} active elective allocation(s), but only ${
+        electiveSelection.allocatedElectivesCount || 0
+      } allocated. Elective selection required prior to generation.`,
+      'ELECTIVE_SELECTION_REQUIRED',
+      {
+        expectedSemester,
+        requiredSlots: electiveSlots.map((s) => s.slot),
+        requiredSlotsCount: electiveSlots.length,
+        allocatedCount: electiveSelection.allocatedElectivesCount || 0,
+        allocatedElectives: electiveSelection.allocatedElectives || [],
+      }
+    );
   }
+
+  // 6. Convert design context courses → solver requirements (zero N+1 queries)
+  const { resolvedRequirements, facultyIdsSet, schedulableCourses } = resolveRequirementsFromDesignData(
+    designData,
+    academicContextId
+  );
 
   // 6. Expand requirements into schedulable solver variables
   const labVariables = [];
@@ -921,6 +987,7 @@ async function buildSchedulingContextFromDesign(input = {}) {
   return {
     context,
     version,
+    versionCreatedByThisRun,
     expectedSemester,
     resolvedRequirements,
     labVariables,
@@ -945,5 +1012,8 @@ module.exports = {
   buildSchedulingContext,
   buildSchedulingContextFromDesign,
   validateAssignmentPlanAgainstDesign,
+  resolveRequirementsFromDesignData,
   YEAR_TO_SEMESTER,
+  IMMUTABLE_VERSION_STATUSES,
+  MUTABLE_VERSION_STATUSES,
 };

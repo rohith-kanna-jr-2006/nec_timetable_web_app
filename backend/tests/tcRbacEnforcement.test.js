@@ -256,7 +256,48 @@ async function run() {
   console.log('\n--- TC Submit Test (must PASS) ---');
 
   if (testVersionId) {
+    // Phase 5: a version with zero sessions is not reviewable and must be
+    // rejected before it can ever reach the HOD.
     await TimetableVersion.findByIdAndUpdate(testVersionId, { status: 'GENERATED' });
+    const emptySubmitRes = await makeRequest(app, {
+      method: 'PATCH',
+      path: `/api/timetable/version/${testVersionId}/status`,
+      headers: { Authorization: `Bearer ${tcToken}` },
+      body: { status: 'PENDING_HOD_APPROVAL' },
+    });
+    assert(emptySubmitRes.statusCode === 409, `TC submit of a zero-session version → 409 (got: ${emptySubmitRes.statusCode})`);
+    assert(
+      emptySubmitRes.body.error && emptySubmitRes.body.error.code === 'TIMETABLE_NOT_READY_FOR_SUBMISSION',
+      `Zero-session submit error code = TIMETABLE_NOT_READY_FOR_SUBMISSION (got: ${emptySubmitRes.body.error && emptySubmitRes.body.error.code})`
+    );
+
+    // Give the version one HOD-approved session so the RBAC path (TC may
+    // submit) is still exercised against a reviewable timetable.
+    const hodAlloc = await HODFacultyAllocation.findOne({
+      academicContextId: ctx._id,
+      status: { $ne: 'REJECTED' },
+      facultyId: { $exists: true, $ne: null },
+    });
+    if (hodAlloc) {
+      const seedSessionRes = await makeRequest(app, {
+        method: 'POST',
+        path: '/api/timetable/session',
+        headers: { Authorization: `Bearer ${tcToken}` },
+        body: {
+          timetableVersionId: testVersionId,
+          academicContextId: ctx._id,
+          courseCode: hodAlloc.courseCode,
+          facultyId: hodAlloc.facultyId,
+          day: 'SAT',
+          period: 'P8',
+          room: 'LH-101',
+        },
+      });
+      assert(seedSessionRes.statusCode === 201, `Seed session created for the submit fixture (HTTP ${seedSessionRes.statusCode})`);
+    } else {
+      console.log('  (no HOD allocation available to seed a session)');
+    }
+
     const tcSubmitRes = await makeRequest(app, {
       method: 'PATCH',
       path: `/api/timetable/version/${testVersionId}/status`,
