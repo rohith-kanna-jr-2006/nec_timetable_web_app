@@ -7,6 +7,7 @@ const HODFacultyAllocation = require('../models/HODFacultyAllocation');
 const {
   transitionTimetableStatus,
   solveAndPersistTimetable,
+  solveFromDesignContext,
   getFacultySchedule,
   getClassSchedule,
 } = require('../services/timetableService');
@@ -867,6 +868,75 @@ async function getDesignContext(req, res, next) {
   }
 }
 
+/**
+ * Generate timetable from TC Design Context (Phase 4)
+ * POST /api/timetable/generate-from-context
+ *
+ * Uses the Phase 3 TC Design Context for authoritative, batched data
+ * resolution.  The solver derives course list, faculty assignments,
+ * and period counts entirely from HOD-approved allocations — no frontend
+ * override is possible.
+ *
+ * Body: { academicContextId, timetableVersionId?, assignmentPlan?, generationSeed?, options? }
+ */
+async function generateFromDesignContext(req, res, next) {
+  try {
+    const { academicContextId, timetableVersionId, assignmentPlan, generationSeed, options } = req.body || {};
+
+    if (!academicContextId) {
+      return errorResponse(res, 'academicContextId is required.', 400, 'INVALID_CONTEXT');
+    }
+
+    const result = await solveFromDesignContext(
+      {
+        academicContextId,
+        timetableVersionId,
+        assignmentPlan,
+        generationSeed,
+        options,
+      },
+      req.user || {}
+    );
+
+    if (!result.success) {
+      return errorResponse(res, result.message || 'Timetable generation failed.', 409, result.code || 'GENERATION_FAILED', {
+        metrics: result.metrics,
+        diagnostics: result.diagnostics,
+        designContext: result.designContext,
+      });
+    }
+
+    return successResponse(res, result, 201);
+  } catch (error) {
+    if (error instanceof ConstraintBuilderError || error.name === 'ConstraintBuilderError') {
+      const codeToStatus = {
+        CONTEXT_NOT_FOUND: 404,
+        COURSE_NOT_FOUND: 404,
+        FACULTY_NOT_FOUND: 404,
+        VERSION_NOT_FOUND: 404,
+        INVALID_CONTEXT: 400,
+        CONTEXT_INACTIVE: 400,
+        INVALID_COHORT_YEAR: 400,
+        NO_COURSES_FOUND: 404,
+        HOD_ALLOCATION_REQUIRED: 409,
+        HOD_ALLOCATION_CONFLICT: 409,
+        HOD_FACULTY_MISMATCH: 409,
+        COURSE_SEMESTER_MISMATCH: 409,
+        ELECTIVE_SELECTION_REQUIRED: 409,
+        VERSION_LOCKED: 409,
+        FACULTY_INACTIVE: 409,
+        ALLOCATION_INCOMPLETE: 409,
+        ASSIGNMENT_PLAN_INVALID: 400,
+        TIMETABLE_VERSION_CONTEXT_MISMATCH: 409,
+        DESIGN_CONTEXT_ERROR: 400,
+      };
+      const statusCode = codeToStatus[error.code] || 400;
+      return errorResponse(res, error.message, statusCode, error.code, error.details);
+    }
+    next(error);
+  }
+}
+
 module.exports = {
   getVersions,
   getVersionById,
@@ -881,4 +951,5 @@ module.exports = {
   deleteSession,
   solveTimetable,
   getDesignContext,
+  generateFromDesignContext,
 };

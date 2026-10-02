@@ -534,8 +534,416 @@ async function buildSchedulingContext(input = {}) {
   };
 }
 
+// ---------------------------------------------------------------------------
+// Phase 4: Server-Derived Generation from TC Design Context
+// ---------------------------------------------------------------------------
+
+/**
+ * Validates a frontend-supplied assignmentPlan against the server-derived
+ * TC design context.  Returns a list of validation errors (empty = valid).
+ *
+ * @param {Array}  assignmentPlan  - Frontend-supplied plan items
+ * @param {Object} designContext   - Phase 3 getTCTimetableDesignContext().data
+ * @returns {{ valid: boolean, errors: Array }}
+ */
+function validateAssignmentPlanAgainstDesign(assignmentPlan, designContext) {
+  if (!Array.isArray(assignmentPlan) || assignmentPlan.length === 0) {
+    return { valid: true, errors: [] };
+  }
+
+  const errors = [];
+  const courseMap = new Map();
+  designContext.courses.forEach((c) => courseMap.set(c.courseCode, c));
+
+  for (const item of assignmentPlan) {
+    if (!item.courseCode) continue;
+    const code = item.courseCode.toUpperCase().trim();
+
+    // 1. Course must exist in the design context curriculum
+    const serverCourse = courseMap.get(code);
+    if (!serverCourse) {
+      errors.push({
+        courseCode: code,
+        error: 'COURSE_NOT_IN_CURRICULUM',
+        message: `Course '${code}' is not in the curriculum for this academic context.`,
+      });
+      continue;
+    }
+
+    // 2. Faculty must match HOD authoritative assignment
+    if (item.facultyId) {
+      const submittedFid = item.facultyId.trim();
+      const serverFids = serverCourse.facultyAssignments
+        .filter((fa) => fa.valid !== false)
+        .map((fa) => fa.facultyId);
+
+      if (serverFids.length > 0 && !serverFids.includes(submittedFid)) {
+        errors.push({
+          courseCode: code,
+          error: 'HOD_FACULTY_MISMATCH',
+          message: `Submitted faculty '${submittedFid}' does not match authoritative HOD faculty [${serverFids.join(', ')}] for course '${code}'.`,
+          submittedFacultyId: submittedFid,
+          authorizedFacultyIds: serverFids,
+        });
+      }
+    }
+
+    // 3. requiredPeriods must not exceed server-derived value
+    if (item.requiredPeriods && serverCourse.requiredPeriods) {
+      if (item.requiredPeriods > serverCourse.requiredPeriods * 2) {
+        errors.push({
+          courseCode: code,
+          error: 'INVALID_PERIOD_COUNT',
+          message: `Submitted requiredPeriods (${item.requiredPeriods}) exceeds reasonable limit for '${code}' (server: ${serverCourse.requiredPeriods}).`,
+        });
+      }
+    }
+  }
+
+  return { valid: errors.length === 0, errors };
+}
+
+/**
+ * Builds the scheduling problem spec using the Phase 3 TC Design Context
+ * for authoritative, batched data resolution.
+ *
+ * This is the preferred generation path — it reuses the Phase 3 service
+ * which batch-loads all courses, HOD allocations, and faculty in 5 queries
+ * (zero N+1), then converts the design dataset into solver variables.
+ *
+ * @param {Object} input - { academicContextId, timetableVersionId, assignmentPlan, gridConfig, generationSeed, options }
+ * @returns {Object} Solver problem spec compatible with solveTimetable()
+ */
+async function buildSchedulingContextFromDesign(input = {}) {
+  const {
+    academicContextId,
+    timetableVersionId,
+    assignmentPlan,
+    gridConfig = {},
+  } = input;
+
+  // Import Phase 3 service
+  const { getTCTimetableDesignContext } = require('../tcDesignContextService');
+
+  if (!academicContextId) {
+    throw new ConstraintBuilderError(
+      'academicContextId is required for timetable generation.',
+      'INVALID_CONTEXT'
+    );
+  }
+
+  // 1. Get the authoritative design context (5 batched queries)
+  const designResult = await getTCTimetableDesignContext(academicContextId);
+
+  if (!designResult.success) {
+    throw new ConstraintBuilderError(
+      designResult.message,
+      designResult.code || 'DESIGN_CONTEXT_ERROR',
+      { academicContextId }
+    );
+  }
+
+  const designData = designResult.data;
+  const context = await AcademicContext.findById(academicContextId);
+
+  // 2. Readiness pre-check
+  if (!designData.readiness.allRequiredAllocationsComplete) {
+    const pendingCourses = designData.courses
+      .filter((c) => !c.timetableEligible && c.allocationRule !== 'MC_OPTIONAL_MAPPING')
+      .map((c) => ({
+        courseCode: c.courseCode,
+        courseName: c.courseName,
+        allocationStatus: c.allocationStatus,
+        reason: c.timetableEligibilityReason,
+      }));
+
+    throw new ConstraintBuilderError(
+      `Timetable generation blocked: ${pendingCourses.length} course(s) have incomplete HOD faculty allocations.`,
+      'ALLOCATION_INCOMPLETE',
+      {
+        readinessState: designData.readiness.state,
+        completedCourses: designData.readiness.completedCourses,
+        pendingCourses,
+      }
+    );
+  }
+
+  // 3. Validate frontend assignmentPlan against server truth (if provided)
+  if (Array.isArray(assignmentPlan) && assignmentPlan.length > 0) {
+    const planValidation = validateAssignmentPlanAgainstDesign(assignmentPlan, designData);
+    if (!planValidation.valid) {
+      throw new ConstraintBuilderError(
+        `Assignment plan validation failed: ${planValidation.errors.length} item(s) conflict with authoritative HOD data.`,
+        'ASSIGNMENT_PLAN_INVALID',
+        { validationErrors: planValidation.errors }
+      );
+    }
+  }
+
+  // 4. Resolve or create TimetableVersion
+  let version = null;
+  if (timetableVersionId) {
+    version = await TimetableVersion.findById(timetableVersionId);
+    if (!version) {
+      throw new ConstraintBuilderError(
+        `Timetable version '${timetableVersionId}' not found.`,
+        'VERSION_NOT_FOUND',
+        { timetableVersionId }
+      );
+    }
+    if (['PUBLISHED', 'APPROVED'].includes(version.status)) {
+      throw new ConstraintBuilderError(
+        `Timetable version '${version.versionLabel}' is ${version.status} and cannot be modified.`,
+        'VERSION_LOCKED',
+        { status: version.status }
+      );
+    }
+    // Verify version belongs to the context
+    if (version.academicContextId) {
+      const vCtxId = version.academicContextId.toString();
+      const reqCtxId = context._id.toString();
+      if (vCtxId !== reqCtxId) {
+        throw new ConstraintBuilderError(
+          `Timetable version '${version._id}' belongs to context '${vCtxId}', not to requested context '${reqCtxId}'.`,
+          'TIMETABLE_VERSION_CONTEXT_MISMATCH',
+          { versionContextId: vCtxId, requestedContextId: reqCtxId }
+        );
+      }
+    }
+  } else {
+    // Use the design context's current version or create a new one
+    if (designData.currentVersion && !['PUBLISHED', 'APPROVED'].includes(designData.currentVersion.status)) {
+      version = await TimetableVersion.findById(designData.currentVersion.id);
+    }
+
+    if (!version) {
+      version = await TimetableVersion.findOne({
+        academicContextId: context._id,
+        status: { $nin: ['PUBLISHED', 'APPROVED'] },
+      }).sort({ createdAt: -1 });
+    }
+
+    if (!version) {
+      version = await TimetableVersion.create({
+        academicContextId: context._id,
+        academicYear: context.academicYear,
+        semester: context.semester,
+        department: context.department,
+        year: context.year,
+        section: context.section,
+        version: 1,
+        versionLabel: 'v1.0 (Auto-Generated)',
+        status: 'GENERATED',
+        generatedBy: 'Auto-Solver',
+      });
+    }
+  }
+
+  const expectedSemester = designData.curriculumSemester;
+
+  // 5. Convert design context courses → solver requirements (zero N+1 queries)
+  const resolvedRequirements = [];
+  const facultyIdsSet = new Set();
+
+  // Filter courses that are eligible for scheduling
+  const schedulableCourses = designData.courses.filter((c) => {
+    // MC_OPTIONAL_MAPPING with OPTIONAL_NOT_MAPPED should be excluded
+    if (c.allocationRule === 'MC_OPTIONAL_MAPPING' && c.allocationStatus === 'OPTIONAL_NOT_MAPPED') {
+      return false;
+    }
+    // Only schedule courses that are timetable-eligible
+    return c.timetableEligible;
+  });
+
+  for (const course of schedulableCourses) {
+    const isLab = course.sessionType === 'LAB' || course.courseType === 'LAB';
+    const totalPeriod = course.requiredPeriods;
+    const labBlockSize = isLab ? (course.P || totalPeriod || 4) : 1;
+
+    // Build faculty assignments from the design context's authoritative data
+    const validAssignments = course.facultyAssignments.filter((fa) => fa.valid !== false);
+
+    if (validAssignments.length === 0) {
+      throw new ConstraintBuilderError(
+        `Course '${course.courseCode}' (${course.courseName}) has no valid faculty assignment.`,
+        'HOD_ALLOCATION_REQUIRED',
+        { courseCode: course.courseCode, courseName: course.courseName, academicContextId }
+      );
+    }
+
+    const primaryFacultyId = validAssignments[0].facultyId;
+    const primaryFacultyName = validAssignments[0].facultyName || '';
+
+    validAssignments.forEach((fa) => facultyIdsSet.add(fa.facultyId));
+
+    const resolvedFacultyAssignments = validAssignments.map((fa) => ({
+      facultyId: fa.facultyId,
+      facultyName: fa.facultyName || '',
+      role: fa.role || 'PRIMARY',
+    }));
+
+    resolvedRequirements.push({
+      courseCode: course.courseCode,
+      courseName: course.courseName,
+      facultyId: primaryFacultyId,
+      facultyName: primaryFacultyName,
+      facultyAssignments: resolvedFacultyAssignments,
+      isLab,
+      totalPeriod,
+      labBlockSize,
+      sessionType: isLab ? 'LAB' : (course.courseType || 'THEORY'),
+      room: isLab ? (course.category === 'CSE' ? 'Systems Lab' : 'Laboratory') : 'LH-101',
+    });
+  }
+
+  // 6. Expand requirements into schedulable solver variables
+  const labVariables = [];
+  const theoryVariables = [];
+
+  for (const req of resolvedRequirements) {
+    if (req.isLab) {
+      const blocksCount = Math.max(1, Math.floor(req.totalPeriod / req.labBlockSize));
+      for (let b = 1; b <= blocksCount; b++) {
+        labVariables.push({
+          id: `${req.courseCode}-LAB-${b}`,
+          courseCode: req.courseCode,
+          courseName: req.courseName,
+          facultyId: req.facultyId,
+          facultyName: req.facultyName,
+          facultyAssignments: req.facultyAssignments,
+          isLab: true,
+          duration: req.labBlockSize,
+          sessionType: 'LAB',
+          room: req.room,
+        });
+      }
+    } else {
+      for (let p = 1; p <= req.totalPeriod; p++) {
+        theoryVariables.push({
+          id: `${req.courseCode}-T-${p}`,
+          courseCode: req.courseCode,
+          courseName: req.courseName,
+          facultyId: req.facultyId,
+          facultyName: req.facultyName,
+          facultyAssignments: req.facultyAssignments,
+          isLab: false,
+          duration: 1,
+          sessionType: req.sessionType,
+          room: req.room,
+        });
+      }
+    }
+  }
+
+  // 7. Build faculty availability and global occupancy maps
+  // (Same logic as the original buildSchedulingContext, but reuses facultyIdsSet)
+  const mongoose = require('mongoose');
+  const facultyUnavailableSet = new Set();
+  let unavailRecords = [];
+  if (mongoose.connection.readyState === 1) {
+    try {
+      unavailRecords = await FacultyAvailability.find({
+        facultyId: { $in: Array.from(facultyIdsSet) },
+        status: 'UNAVAILABLE',
+      });
+    } catch (_) {}
+  }
+  unavailRecords.forEach((u) => {
+    facultyUnavailableSet.add(`${u.facultyId}_${u.day}_${u.period}`);
+  });
+
+  // Global Faculty Occupancy from other academic contexts
+  const globalFacultyOccupancy = new Map();
+  let otherSessions = [];
+
+  if (mongoose.connection.readyState === 1) {
+    try {
+      const activeVersions = await TimetableVersion.find({
+        status: { $in: ['PUBLISHED', 'APPROVED', 'GENERATED', 'SUBMITTED'] },
+      }).select('_id');
+      const activeVersionIds = activeVersions.map((v) => v._id);
+
+      otherSessions = await TimetableSession.find({
+        academicContextId: { $ne: context._id },
+        ...(activeVersionIds.length > 0 ? { timetableVersionId: { $in: activeVersionIds } } : {}),
+        $or: [
+          { facultyId: { $in: Array.from(facultyIdsSet) } },
+          { 'facultyAssignments.facultyId': { $in: Array.from(facultyIdsSet) } },
+        ],
+      }).lean();
+    } catch (err) {
+      console.warn('[constraintBuilder] DB query for external sessions warning:', err.message);
+    }
+  }
+
+  otherSessions.forEach((s) => {
+    const fids = [s.facultyId, ...(s.facultyAssignments || []).map((a) => a.facultyId)].filter(Boolean);
+    for (const fid of fids) {
+      if (facultyIdsSet.has(fid)) {
+        const key = `${fid}_${s.day}_${s.period}`;
+        globalFacultyOccupancy.set(key, {
+          academicContextId: s.academicContextId,
+          courseCode: s.courseCode,
+          sessionType: s.sessionType,
+        });
+      }
+    }
+  });
+
+  // Existing sessions for this class (for locked/special session preservation)
+  const existingClassOccupancy = new Map();
+  let existingClassSessions = [];
+  if (mongoose.connection.readyState === 1) {
+    try {
+      existingClassSessions = await TimetableSession.find({
+        timetableVersionId: version._id,
+        academicContextId: context._id,
+      });
+    } catch (_) {}
+  }
+
+  const preserveSessionTypes = gridConfig.preserveSessionTypes || ['SAS', 'OTHER'];
+  if (gridConfig.preserveExistingSpecialSessions) {
+    existingClassSessions.forEach((s) => {
+      if (preserveSessionTypes.includes(s.sessionType)) {
+        existingClassOccupancy.set(`${s.day}_${s.period}`, s);
+        globalFacultyOccupancy.set(`${s.facultyId}_${s.day}_${s.period}`, s);
+      }
+    });
+  }
+
+  const finalGridConfig = {
+    days: gridConfig.days || DEFAULT_DAYS,
+    periods: gridConfig.periods || DEFAULT_PERIODS,
+    ...gridConfig,
+  };
+
+  return {
+    context,
+    version,
+    expectedSemester,
+    resolvedRequirements,
+    labVariables,
+    theoryVariables,
+    allVariables: [...labVariables, ...theoryVariables],
+    globalFacultyOccupancy,
+    existingClassOccupancy,
+    facultyUnavailableSet,
+    gridConfig: finalGridConfig,
+    // Phase 4: additional metadata for diagnostics
+    _designContext: {
+      readiness: designData.readiness,
+      electiveSelection: designData.electiveSelection,
+      totalDesignCourses: designData.courses.length,
+      schedulableCourses: schedulableCourses.length,
+    },
+  };
+}
+
 module.exports = {
   ConstraintBuilderError,
   buildSchedulingContext,
+  buildSchedulingContextFromDesign,
+  validateAssignmentPlanAgainstDesign,
   YEAR_TO_SEMESTER,
 };

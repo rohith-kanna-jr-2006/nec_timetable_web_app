@@ -1,7 +1,7 @@
 const TimetableVersion = require('../models/TimetableVersion');
 const TimetableSession = require('../models/TimetableSession');
 const AcademicContext = require('../models/AcademicContext');
-const { buildSchedulingContext } = require('./timetable/constraintBuilder');
+const { buildSchedulingContext, buildSchedulingContextFromDesign } = require('./timetable/constraintBuilder');
 const { solveTimetable } = require('./timetable/timetableSolver');
 const {
   isFacultyAvailable,
@@ -377,9 +377,168 @@ async function getClassSchedule(academicContextId, versionId = null) {
   return generateClassTimetable(rawSessions, academicContextId);
 }
 
+/**
+ * Solves timetable using the Phase 4 server-derived design context path.
+ *
+ * Preferred generation pathway:
+ *   1. Uses Phase 3 TC Design Context for batched, authoritative data loading
+ *   2. Validates readiness (all required allocations complete)
+ *   3. Validates frontend assignmentPlan against server truth (if provided)
+ *   4. Runs the same CSP solver and persists sessions identically
+ *
+ * @param {Object} input - { academicContextId, timetableVersionId, assignmentPlan, generationSeed, options }
+ * @param {Object} user - Requester user object
+ * @returns {Object} Solution result with persisted sessions and metrics
+ */
+async function solveFromDesignContext(input, user = {}) {
+  // 1. Build problem context using design-derived batched path
+  const problemSpec = await buildSchedulingContextFromDesign(input);
+
+  // 2. Run in-memory CSP solver (same as solveAndPersistTimetable)
+  const solverOptions = {
+    generationSeed: input.generationSeed,
+    ...input.options,
+  };
+
+  const { version, context, allVariables, _designContext } = problemSpec;
+
+  // Published / Approved immutability guard
+  if (version && ['PUBLISHED', 'APPROVED'].includes(version.status)) {
+    return {
+      success: false,
+      code: 'VERSION_LOCKED',
+      message: `Timetable version '${version.versionLabel || version._id}' is ${version.status} and cannot be modified.`,
+      academicContextId: context ? context._id : null,
+      timetableVersionId: version ? version._id : null,
+      status: version.status,
+      sessionsCreated: 0,
+      sessions: [],
+    };
+  }
+
+  const solution = await solveTimetable(problemSpec, solverOptions);
+
+  if (!solution.success) {
+    return {
+      ...solution,
+      academicContextId: context ? context._id : null,
+      timetableVersionId: version ? version._id : null,
+      status: version ? version.status : null,
+      sessionsCreated: 0,
+      sessions: [],
+      designContext: _designContext,
+    };
+  }
+
+  // Zero-session safety
+  const requiredPeriods = (allVariables && allVariables.length) || 0;
+  if (requiredPeriods > 0 && (!solution.sessions || solution.sessions.length === 0)) {
+    return {
+      success: false,
+      code: 'ZERO_SESSIONS_GENERATED',
+      message: `Solver completed but produced zero scheduled sessions when ${requiredPeriods} periods were required.`,
+      academicContextId: context ? context._id : null,
+      timetableVersionId: version ? version._id : null,
+      status: version ? version.status : null,
+      sessionsCreated: 0,
+      sessions: [],
+      diagnostics: solution.diagnostics,
+      metrics: solution.metrics,
+      designContext: _designContext,
+    };
+  }
+
+  // 3. Persist sessions (identical to solveAndPersistTimetable)
+  const sessionsToInsert = solution.sessions.map((s) => ({
+    ...s,
+    class: context ? `${context.year || ''} ${context.department || ''} ${context.section || ''}`.trim() : (s.class || 'Classroom'),
+    year: context ? context.year : (s.year || null),
+    section: context ? context.section : (s.section || null),
+    department: context ? context.department : (s.department || null),
+    subject: s.courseName || s.courseCode,
+    subjectType: s.sessionType || 'THEORY',
+    faculty: s.facultyName || s.facultyId,
+    startPeriod: s.period,
+    endPeriod: s.period,
+    timetableVersionId: version ? version._id : null,
+    academicContextId: context ? context._id : null,
+  }));
+
+  let inserted = sessionsToInsert;
+  const mongoose = require('mongoose');
+
+  if (mongoose.connection.readyState === 1) {
+    try {
+      await TimetableSession.deleteMany({
+        timetableVersionId: version._id,
+        academicContextId: context._id,
+      });
+      inserted = await TimetableSession.insertMany(sessionsToInsert);
+
+      if (sessionsToInsert.length > 0 && inserted.length !== sessionsToInsert.length) {
+        return {
+          success: false,
+          code: 'PERSISTENCE_FAILED',
+          message: `Persistence assertion failed: expected ${sessionsToInsert.length} documents, but inserted ${inserted.length}.`,
+          academicContextId: context ? context._id : null,
+          timetableVersionId: version ? version._id : null,
+          status: version ? version.status : null,
+          sessionsCreated: inserted.length,
+          sessions: inserted,
+          diagnostics: solution.diagnostics,
+          designContext: _designContext,
+        };
+      }
+    } catch (dbErr) {
+      console.warn('[timetableService] DB persistence warning:', dbErr.message);
+      return {
+        success: false,
+        code: 'PERSISTENCE_ERROR',
+        message: `Database error while persisting timetable sessions: ${dbErr.message}`,
+        academicContextId: context ? context._id : null,
+        timetableVersionId: version ? version._id : null,
+        status: version ? version.status : null,
+        sessionsCreated: 0,
+        sessions: [],
+        diagnostics: solution.diagnostics,
+        designContext: _designContext,
+      };
+    }
+  }
+
+  // Update version metadata
+  if (version) {
+    version.status = 'GENERATED';
+    version.totalScheduledPeriods = inserted.length;
+    version.hardConflicts = 0;
+    version.generatedBy = user.name || user.email || 'Coordinator';
+    if (mongoose.connection.readyState === 1) {
+      try {
+        await version.save();
+      } catch (_) {}
+    }
+  }
+
+  return {
+    success: true,
+    academicContextId: context ? context._id : null,
+    timetableVersionId: version ? version._id : null,
+    timetableVersion: version,
+    status: version ? version.status : 'GENERATED',
+    generationSeed: solution.generationSeed,
+    sessionsCreated: inserted.length,
+    sessions: inserted,
+    assignments: inserted,
+    metrics: solution.metrics,
+    diagnostics: solution.diagnostics,
+    designContext: _designContext,
+  };
+}
+
 module.exports = {
   transitionTimetableStatus,
   solveAndPersistTimetable,
+  solveFromDesignContext,
   getFacultySchedule,
   getClassSchedule,
   isFacultyAvailable,
