@@ -21,7 +21,7 @@ const {
 const {
   TimetableSubmissionError,
   isVersionSubmissionLocked,
-  isVersionSubmittedForApproval,
+  isVersionTimetableFrozen,
 } = require('../services/timetableSubmissionService');
 const { successResponse, errorResponse } = require('../utils/responseHandler');
 
@@ -322,11 +322,16 @@ async function transitionVersion(req, res, next) {
     if (error instanceof TimetableSubmissionError || error.name === 'TimetableSubmissionError') {
       return errorResponse(res, error.message, error.statusCode || 409, error.code, error.details);
     }
-    // Service-layer authorization errors carry statusCode + code.
+    // Phase 6: the transition service raises structured errors for state-machine
+    // violations (409), context mismatch (409) and authorization (403). They are
+    // mapped from `code` + `statusCode` so no message string-matching is needed.
+    if (error && error.code && error.statusCode && typeof error.details !== 'undefined') {
+      return errorResponse(res, error.message, error.statusCode, error.code, error.details);
+    }
+    // Backward-compatible fallbacks for any unstructured service error.
     if (error.statusCode === 403 || error.code === 'STATE_TRANSITION_ERROR') {
       return errorResponse(res, error.message, 403, 'STATE_TRANSITION_ERROR');
     }
-    // State machine constraint errors (invalid transition)
     if (error.message && error.message.includes('Invalid status transition')) {
       return errorResponse(res, error.message, 403, 'STATE_TRANSITION_ERROR');
     }
@@ -753,12 +758,12 @@ async function createSession(req, res, next) {
     const finalVersionId = version._id;
     const finalContextId = context._id;
 
-    // Phase 5: once GENERATED -> PENDING_HOD_APPROVAL the version becomes a
-    // frozen review artifact. Mutating it would silently rewrite what the HOD
-    // is looking at. The sanctioned revision path is
-    // PENDING_HOD_APPROVAL -> REJECTED -> (new editable version) -> GENERATED
-    // -> PENDING_HOD_APPROVAL.
-    if (isVersionSubmittedForApproval(version.status)) {
+    // Phase 5/6: once a version leaves the TC's hands its timetable is frozen.
+    // PENDING_HOD_APPROVAL is under HOD review, APPROVED is ratified and
+    // PUBLISHED is public history. Mutating any of them would silently rewrite
+    // what the HOD ratified or what students already see. The sanctioned revision
+    // path is PENDING_HOD_APPROVAL -> REJECTED -> new version -> GENERATED.
+    if (isVersionTimetableFrozen(version.status)) {
       return errorResponse(
         res,
         `Timetable version is ${version.status} and cannot be modified.`,
@@ -942,8 +947,9 @@ async function createSession(req, res, next) {
  * Delete a session from timetable
  * DELETE /api/timetable/session/:id
  *
- * Phase 5: a submitted version is immutable — the session is located first so
- * the lock can be reported against the owning version rather than 404ing.
+ * Phase 5/6: a submitted/approved/published version is immutable — the session
+ * is located first so the lock can be reported against the owning version
+ * rather than 404ing.
  */
 async function deleteSession(req, res, next) {
   try {
@@ -956,7 +962,7 @@ async function deleteSession(req, res, next) {
       ? await TimetableVersion.findById(existing.timetableVersionId)
       : null;
 
-    if (owningVersion && isVersionSubmittedForApproval(owningVersion.status)) {
+    if (owningVersion && isVersionTimetableFrozen(owningVersion.status)) {
       return errorResponse(
         res,
         `Timetable version is ${owningVersion.status} and its sessions cannot be modified.`,

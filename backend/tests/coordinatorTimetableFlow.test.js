@@ -224,29 +224,27 @@ async function runCoordinatorTimetableFlowTests() {
     assert(allocs[0].facultyId === 'FWL-04', 'Authoritative facultyId is FWL-04');
     assert(allocs[0].status === 'APPROVED', 'Authoritative allocation status is APPROVED');
 
-    // Setup clean timetable version for testing session scheduling
-    await TimetableSession.deleteMany({ academicContextId: ctxIII_A._id, day: 'SAT' });
-    let testVersion = await TimetableVersion.findOne({
+    // Setup a timetable version this suite fully owns.
+    //
+    // Phase 6: a version in PENDING_HOD_APPROVAL / APPROVED / PUBLISHED is a
+    // frozen governance artifact, so POST/DELETE /api/timetable/session are
+    // rejected against it (TIMETABLE_VERSION_NOT_EDITABLE). This suite must
+    // therefore create and own a GENERATED working version instead of borrowing
+    // whichever seeded version happens to match first — previously it picked a
+    // real APPROVED rollout version and tried to mutate it.
+    const testVersion = await TimetableVersion.create({
+      academicContextId: ctxIII_A._id,
+      academicYear: '2026-27',
+      semester: 'Odd Semester',
       department: 'CSE',
       year: 'III Year',
       section: 'A',
+      version: 2,
+      versionLabel: 'v2.0 Test Suite',
+      status: 'GENERATED',
     });
-    if (!testVersion) {
-      testVersion = await TimetableVersion.create({
-        academicContextId: ctxIII_A._id,
-        academicYear: '2026-27',
-        semester: 'Odd Semester',
-        department: 'CSE',
-        year: 'III Year',
-        section: 'A',
-        version: 2,
-        versionLabel: 'v2.0 Test Suite',
-        status: 'GENERATED',
-      });
-    } else if (!testVersion.academicContextId) {
-      testVersion.academicContextId = ctxIII_A._id;
-      await testVersion.save();
-    }
+    // Only this suite's own sessions are removed.
+    await TimetableSession.deleteMany({ timetableVersionId: testVersion._id });
 
     // ------------------------------------------------------------
     // TEST 6: No HOD allocation -> scheduling rejected
@@ -619,10 +617,9 @@ async function runCoordinatorTimetableFlowTests() {
     const totalActiveContexts = await AcademicContext.countDocuments({ status: 'ACTIVE' });
     assert(totalActiveContexts === 12, `Total active academic contexts remains exactly 12 (got: ${totalActiveContexts})`);
 
-    // Clean up test sessions
-    await TimetableSession.findByIdAndDelete(createdSessionId);
-    await TimetableSession.findByIdAndDelete(repeatSessionId);
-    await TimetableSession.findByIdAndDelete(facRepeatSessionId);
+    // Clean up this suite's own version and its sessions
+    await TimetableSession.deleteMany({ timetableVersionId: testVersion._id });
+    await TimetableVersion.findByIdAndDelete(testVersion._id);
     await User.deleteMany({ email: { $in: testUsers.map((u) => u.email) } });
 
     console.log('\n============================================================');

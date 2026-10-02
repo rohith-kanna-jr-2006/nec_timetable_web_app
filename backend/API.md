@@ -697,6 +697,72 @@ State machine transition:
   `AC`) or ADMIN.
 - **Body**: `{ "status": "...", "rejectionReason"?: string, "academicContextId"?: ObjectId }`
 
+#### HOD approval, rejection and publication (Phase 6)
+
+This single endpoint is also the complete governance API; no new route was added.
+Authority is evaluated **before** the state machine, so a caller without permission
+always receives `403` and never a `409` that would imply the edge itself was merely invalid.
+
+| Target | Allowed from | Authority |
+| :--- | :--- | :--- |
+| `APPROVED` | `PENDING_HOD_APPROVAL` | HOD, ADMIN |
+| `REJECTED` | `PENDING_HOD_APPROVAL` | HOD, ADMIN |
+| `PUBLISHED` | `APPROVED` | HOD, ADMIN |
+
+- **Unauthenticated** — `401`. **TC / FACULTY** targeting any approval status —
+  `403 STATE_TRANSITION_ERROR`. A `TC` may never move a version out of
+  `PENDING_HOD_APPROVAL`, even to `GENERATED`.
+- **HOD may not design.** Targeting `DRAFT`, `GENERATED` or
+  `PENDING_HOD_APPROVAL` is `403 STATE_TRANSITION_ERROR`.
+- **Exact version, exact context.** `PUBLISHED` is reachable only from `APPROVED`,
+  so an approved revision is never published by accident. When `academicContextId`
+  is supplied it must equal the version's own context anchor; otherwise
+  `409 TIMETABLE_VERSION_CONTEXT_MISMATCH` and the version is left untouched.
+- **Skipped edges** (for example `GENERATED -> PUBLISHED`, or any transition out of
+  `PUBLISHED`) are `409 INVALID_TIMETABLE_STATUS_TRANSITION`.
+- **Unknown version** — `404 VERSION_NOT_FOUND`.
+- **Rejection** — `rejectionReason`, when present, must be a non-empty string of at
+  most 500 characters (`400 BAD_REQUEST`). It is stored on the exact
+  `TimetableVersion` as `rejectionReason` and returned by `GET /version/:id`.
+
+> **Legacy edges retained.** `ALLOWED_TRANSITIONS` still permits
+> `APPROVED -> REJECTED` and `REJECTED -> DRAFT | GENERATED`. These predate Phase 6
+> and were deliberately left in place: `REJECTED` is also a member of
+> `MUTABLE_VERSION_STATUSES`, which three solver version-resolution fallbacks
+> depend on, so removing the edge without reworking that lookup would leave the
+> state machine and version resolution disagreeing. Phase 6 does not rely on
+> them — the rejection workflow below mandates a **new** version — so tightening
+> them is a separate, self-contained follow-up.
+
+#### Governance-version immutability (Phase 6)
+
+`PENDING_HOD_APPROVAL`, `APPROVED`, `PUBLISHED` and `REJECTED` are all frozen
+artifacts (`FROZEN_TIMETABLE_STATUSES` in `services/timetableSubmissionService.js`):
+
+| Endpoint | Result |
+| :--- | :--- |
+| `POST /api/timetable/session` | `409 TIMETABLE_VERSION_NOT_EDITABLE` |
+| `DELETE /api/timetable/session/:id` | `409 TIMETABLE_VERSION_NOT_EDITABLE` |
+| `POST /api/timetable/generate-from-context` (same version) | `409 VERSION_LOCKED` |
+
+A **rejected** version is closed, not merely read-only: the revision workflow
+requires a **new** version, so the rejected record and its sessions are preserved
+as history and never edited in place. The generation engine keeps its own narrower
+lock because a `REJECTED` version may still be re-driven into `GENERATED` by the
+solver. On `REJECTED`, `submittedBy`/`submittedAt` are cleared so the revision
+history stays honest.
+
+#### Publication and public visibility
+
+Publishing sets `PUBLISHED`; it does **not** archive or delete the previous
+published version. `GET /api/timetable/class/:academicContextId` and
+`GET /api/timetable/published/:academicContextId` always serve the **newest**
+`PUBLISHED` version for that context, so superseded versions immediately stop
+being public while remaining available for internal review by `versionId`. Only
+`PUBLISHED` versions are ever public — `GENERATED` and `PENDING_HOD_APPROVAL`
+data never appears, and one context's read never returns another context's
+sessions.
+
 #### TC submission — `GENERATED -> PENDING_HOD_APPROVAL` (Phase 5)
 
 This endpoint **is** the submission API; there is no separate `/submit-timetable`.
@@ -744,8 +810,9 @@ Once a version is `PENDING_HOD_APPROVAL` it is a frozen review artifact:
 | `POST /api/timetable/generate-from-context` (same version) | `409 VERSION_LOCKED` |
 
 The only sanctioned revision path is
-`PENDING_HOD_APPROVAL -> REJECTED -> new/editable version -> GENERATED -> PENDING_HOD_APPROVAL`.
-On `REJECTED`, `submittedBy`/`submittedAt` are cleared so the revision history stays honest.
+`PENDING_HOD_APPROVAL -> REJECTED -> new version -> GENERATED -> PENDING_HOD_APPROVAL`.
+See **Governance-version immutability (Phase 6)** below for the full frozen-status
+matrix, and **Publication and public visibility** for what `PUBLISHED` means.
 
 ### `POST /api/timetable/solve`
 Automatic timetable solver invoking the Constraint Satisfaction & Optimization Problem (CSOP/CSP) engine.

@@ -26,22 +26,51 @@ const ALLOWED_TRANSITIONS = {
 };
 
 /**
+ * Builds a structured error the controller can map without string matching.
+ *
+ * Phase 6: a state-machine violation is a 409 conflict about the data, not a
+ * 403 authorization failure. Authorization denials keep STATE_TRANSITION_ERROR
+ * so the existing Phase 1 contract is untouched.
+ */
+function _transitionError(message, code, statusCode, details = null) {
+  const err = new Error(message);
+  err.name = 'TimetableTransitionError';
+  err.code = code;
+  err.statusCode = statusCode;
+  err.details = details;
+  return err;
+}
+
+/**
  * Validates and executes a timetable version lifecycle status transition.
  */
 async function transitionTimetableStatus(versionId, targetStatus, user, meta = {}) {
   const version = await TimetableVersion.findById(versionId);
   if (!version) {
-    throw new Error('Timetable version not found.');
+    throw _transitionError('Timetable version not found.', 'VERSION_NOT_FOUND', 404, {
+      timetableVersionId: versionId,
+    });
+  }
+
+  // Phase 6 context integrity: every governance action (submit, approve, reject,
+  // publish) must operate on the exact AcademicContext the caller believes it is
+  // acting on. TimetableVersion.academicContextId is the authoritative anchor, so
+  // it is never inferred from academicYear / semester / department / year /
+  // section. Without a claim from the caller this check is a no-op.
+  if (meta.academicContextId) {
+    const claimed = meta.academicContextId.toString();
+    const anchored = version.academicContextId ? version.academicContextId.toString() : null;
+    if (anchored !== claimed) {
+      throw _transitionError(
+        `Timetable version '${version._id}' belongs to academic context '${anchored}', not to '${claimed}'.`,
+        'TIMETABLE_VERSION_CONTEXT_MISMATCH',
+        409,
+        { timetableVersionId: version._id, versionContextId: anchored, requestedContextId: claimed }
+      );
+    }
   }
 
   const currentStatus = version.status;
-  const allowed = ALLOWED_TRANSITIONS[currentStatus] || [];
-
-  if (!allowed.includes(targetStatus)) {
-    throw new Error(
-      `Invalid status transition from '${currentStatus}' to '${targetStatus}'. Allowed: ${allowed.join(', ') || 'None'}`
-    );
-  }
 
   /**
    * Role-based status-transition authorization.
@@ -56,6 +85,10 @@ async function transitionTimetableStatus(versionId, targetStatus, user, meta = {
    *   Allowed targets : APPROVED, REJECTED, PUBLISHED
    *   HOD must NOT reach design-only targets (DRAFT, GENERATED) via this path
    *   because the route guard has already limited HOD to the status endpoint only.
+   *
+   * Phase 6: authorization is evaluated BEFORE the state machine, so a caller
+   * who has no authority for a target always receives 403 (never a 409 that
+   * would imply the transition itself was merely invalid).
    */
   const role = user.role;
 
@@ -70,38 +103,85 @@ async function transitionTimetableStatus(versionId, targetStatus, user, meta = {
   if (HOD_ONLY_TARGETS.includes(targetStatus)) {
     // Only HOD or ADMIN can approve, reject, or publish
     if (!['HOD', 'ADMIN'].includes(role)) {
-      const err = new Error(`Only HOD has authority to transition timetable to ${targetStatus}.`);
-      err.statusCode = 403;
-      err.code = 'STATE_TRANSITION_ERROR';
-      throw err;
+      throw _transitionError(
+        `Only HOD has authority to transition timetable to ${targetStatus}.`,
+        'STATE_TRANSITION_ERROR',
+        403,
+        { timetableVersionId: version._id, requestedStatus: targetStatus, role: role || null }
+      );
     }
-    // HOD/ADMIN must not be blocked by the PENDING_HOD_APPROVAL guard below —
-    // they are the only ones who can act on it, so skip further checks.
   } else if (TC_ONLY_TARGETS.includes(targetStatus)) {
     // TC (and legacy AC during migration) may perform design transitions.
     // HOD must NOT be able to design the timetable.
     if (!['TC', 'AC', 'ADMIN'].includes(role)) {
-      const err = new Error(`Only the TimeTable Coordinator has authority to transition timetable to ${targetStatus}.`);
-      err.statusCode = 403;
-      err.code = 'STATE_TRANSITION_ERROR';
-      throw err;
+      throw _transitionError(
+        `Only the TimeTable Coordinator has authority to transition timetable to ${targetStatus}.`,
+        'STATE_TRANSITION_ERROR',
+        403,
+        { timetableVersionId: version._id, requestedStatus: targetStatus, role: role || null }
+      );
     }
   } else {
     // Unknown target — catch-all rejection
-    const err = new Error(`Unauthorized role '${role}' for timetable status transition to ${targetStatus}.`);
-    err.statusCode = 403;
-    err.code = 'STATE_TRANSITION_ERROR';
-    throw err;
+    throw _transitionError(
+      `Unauthorized role '${role}' for timetable status transition to ${targetStatus}.`,
+      'STATE_TRANSITION_ERROR',
+      403,
+      { timetableVersionId: version._id, requestedStatus: targetStatus, role: role || null }
+    );
   }
 
   // Regardless of role, if we are in PENDING_HOD_APPROVAL and the target is NOT
   // a HOD approval action, it must be blocked. (A TC cannot re-generate from this
   // state — the HOD must first reject, returning it to GENERATED/DRAFT.)
   if (currentStatus === 'PENDING_HOD_APPROVAL' && !['HOD', 'ADMIN'].includes(role)) {
-    const err = new Error('Only HOD has authority to review or transition timetable from PENDING_HOD_APPROVAL.');
-    err.statusCode = 403;
-    err.code = 'STATE_TRANSITION_ERROR';
-    throw err;
+    throw _transitionError(
+      'Only HOD has authority to review or transition timetable from PENDING_HOD_APPROVAL.',
+      'STATE_TRANSITION_ERROR',
+      403,
+      { timetableVersionId: version._id, currentStatus, role: role || null }
+    );
+  }
+
+  // Phase 6: state-machine validation runs only for an authorized caller, so an
+  // invalid edge is reported as a conflict about the data, never as an authz error.
+  const allowed = ALLOWED_TRANSITIONS[currentStatus] || [];
+
+  if (!allowed.includes(targetStatus)) {
+    throw _transitionError(
+      `Invalid status transition from '${currentStatus}' to '${targetStatus}'. Allowed: ${allowed.join(', ') || 'None'}`,
+      'INVALID_TIMETABLE_STATUS_TRANSITION',
+      409,
+      {
+        timetableVersionId: version._id,
+        currentStatus,
+        requestedStatus: targetStatus,
+        allowedTransitions: allowed,
+      }
+    );
+  }
+
+  // Phase 6: a rejection must carry a usable reason. The model already stores
+  // rejectionReason, so it is validated rather than silently defaulted away.
+  if (targetStatus === 'REJECTED') {
+    const reason = meta.rejectionReason;
+    if (reason !== undefined && reason !== null && typeof reason !== 'string') {
+      throw _transitionError('rejectionReason must be a string.', 'BAD_REQUEST', 400);
+    }
+    if (typeof reason === 'string' && reason.trim().length === 0) {
+      throw _transitionError(
+        'rejectionReason cannot be empty when rejecting a timetable.',
+        'BAD_REQUEST',
+        400
+      );
+    }
+    if (typeof reason === 'string' && reason.length > 500) {
+      throw _transitionError(
+        'rejectionReason must not exceed 500 characters.',
+        'BAD_REQUEST',
+        400
+      );
+    }
   }
 
   // Phase 5: submitting a timetable for HOD approval is the single most
@@ -617,6 +697,9 @@ async function solveFromDesignContext(input, user = {}) {
 
 module.exports = {
   transitionTimetableStatus,
+  ALLOWED_TRANSITIONS,
+  HOD_ONLY_TARGETS: ['APPROVED', 'REJECTED', 'PUBLISHED'],
+  TC_ONLY_TARGETS: ['NO_TIMETABLE', 'DRAFT', 'GENERATED', 'PENDING_HOD_APPROVAL'],
   solveAndPersistTimetable,
   solveFromDesignContext,
   getFacultySchedule,
