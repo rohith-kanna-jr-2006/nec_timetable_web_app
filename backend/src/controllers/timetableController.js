@@ -12,6 +12,7 @@ const {
 } = require('../services/timetableService');
 const { ConstraintBuilderError } = require('../services/timetable/constraintBuilder');
 const { getAcademicContextWorkflowStatus } = require('../services/contextStatusService');
+const { getTCTimetableDesignContext } = require('../services/tcDesignContextService');
 const { successResponse, errorResponse } = require('../utils/responseHandler');
 
 // ---------------------------------------------------------------------------
@@ -842,6 +843,30 @@ async function solveTimetable(req, res, next) {
   }
 }
 
+/**
+ * Get TC timetable design context
+ * GET /api/timetable/design-context/:academicContextId
+ *
+ * Phase 3: Returns the authoritative design dataset for the TimeTable
+ * Coordinator screen — courses, HOD-approved faculty, allocation status,
+ * readiness, and current version info.  Read-only; never mutates data.
+ */
+async function getDesignContext(req, res, next) {
+  try {
+    const { academicContextId } = req.params;
+
+    const result = await getTCTimetableDesignContext(academicContextId);
+
+    if (!result.success) {
+      return errorResponse(res, result.message, result.statusCode, result.code);
+    }
+
+    return successResponse(res, result.data);
+  } catch (error) {
+    next(error);
+  }
+}
+
 module.exports = {
   getVersions,
   getVersionById,
@@ -855,4 +880,5 @@ module.exports = {
   createSession,
   deleteSession,
   solveTimetable,
+  getDesignContext,
 };

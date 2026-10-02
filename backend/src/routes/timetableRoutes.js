@@ -15,6 +15,15 @@ router.get('/status/:academicContextId', timetableController.getContextStatus);
 router.get('/review-matrix', timetableController.getReviewMatrix);
 router.get('/matrix', timetableController.getReviewMatrix);
 
+// TC Design Context — Phase 3: authoritative design dataset for TC timetable screen.
+// Read-only: TC, HOD, ADMIN (and legacy AC) can view the design context.
+router.get(
+  '/design-context/:academicContextId',
+  authenticateUser,
+  requireRole('TC', 'AC', 'HOD', 'ADMIN'),
+  timetableController.getDesignContext
+);
+
 // Version Management — read (public)
 router.get('/versions', timetableController.getVersions);
 router.get('/version/:id', timetableController.getVersionById);
