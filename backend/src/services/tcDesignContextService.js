@@ -374,6 +374,9 @@ async function getTCTimetableDesignContext(academicContextId) {
       courseType: course.courseType || 'THEORY',
       sessionType,
       category: course.category,
+      // Phase 4: the generation engine needs the owning department to pick the
+      // correct lab room, exactly as the legacy constraintBuilder does.
+      department: course.department || null,
       credits: course.credits,
       requiredPeriods,
       contactPeriod: course.contactPeriod,

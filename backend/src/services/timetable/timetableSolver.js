@@ -104,6 +104,9 @@ async function solveTimetable(problemSpec, options = {}) {
   };
 
   let bestSolution = null;
+  // Last forward-check dead end seen. Surfaced to the TC so an unsatisfiable
+  // result names the blocking course/faculty instead of a bare "unsatisfiable".
+  let lastFailureReason = null;
 
   function convertAssignmentsToSessions(assignmentMap) {
     const sessions = [];
@@ -191,6 +194,7 @@ async function solveTimetable(problemSpec, options = {}) {
 
     if (!forwardCheckResult.feasible) {
       metrics.forwardCheckFailures++;
+      lastFailureReason = forwardCheckResult.failureReason || lastFailureReason;
       return false; // Prune branch early!
     }
 
@@ -295,11 +299,16 @@ async function solveTimetable(problemSpec, options = {}) {
     return {
       success: false,
       code: 'UNSATISFIABLE_CONSTRAINTS',
-      message: 'Constraints are unsatisfiable. No valid complete timetable exists for this configuration.',
+      message: lastFailureReason
+        ? `No valid timetable exists: ${lastFailureReason.message}`
+        : 'Constraints are unsatisfiable. No valid complete timetable exists for this configuration.',
       metrics,
       diagnostics: {
         status: 'FAILED',
-        reason: 'Search tree exhausted without locating a conflict-free schedule.',
+        reason: lastFailureReason
+          ? 'Forward checking found no remaining slot for a required course before the search could continue.'
+          : 'Search tree exhausted without locating a conflict-free schedule.',
+        failureReason: lastFailureReason,
       },
     };
   } catch (err) {
