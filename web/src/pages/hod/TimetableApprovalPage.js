@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useToast } from '../../context/ToastContext';
 import { getTimetableVersions } from '../../services/timetableService';
 import { transitionTimetableVersion } from '../../services/hodAllocationService';
@@ -12,6 +13,7 @@ import ErrorState from '../../components/common/ErrorState';
 import EmptyState from '../../components/common/EmptyState';
 
 export default function TimetableApprovalPage() {
+  const navigate = useNavigate();
   const { showToast } = useToast();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -55,6 +57,10 @@ export default function TimetableApprovalPage() {
     } finally {
       setUpdatingId(null);
     }
+  };
+
+  const handleReview = (versionId, contextId) => {
+    navigate(`/hod/timetable-review?academicContextId=${contextId}&versionId=${versionId}`);
   };
 
   return (
@@ -131,31 +137,46 @@ export default function TimetableApprovalPage() {
                         {ver.generatedBy || 'TimeTable Coordinator'}
                       </td>
                       <td style={{ padding: '12px 16px' }}>
-                        <Badge
-                          variant={
-                            ver.status === 'PUBLISHED'
-                              ? 'success'
-                              : ver.status === 'APPROVED'
-                              ? 'primary'
-                              : ver.status === 'PENDING_HOD_APPROVAL'
-                              ? 'warning'
-                              : ver.status === 'REJECTED'
-                              ? 'danger'
-                              : 'neutral'
-                          }
-                        >
-                          {ver.status}
-                        </Badge>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                          <Badge
+                            variant={
+                              ver.status === 'PUBLISHED'
+                                ? 'success'
+                                : ver.status === 'APPROVED'
+                                ? 'primary'
+                                : ver.status === 'PENDING_HOD_APPROVAL'
+                                ? 'warning'
+                                : ver.status === 'REJECTED'
+                                ? 'danger'
+                                : 'neutral'
+                            }
+                          >
+                            {ver.status}
+                          </Badge>
+                          {ver.status === 'REJECTED' && ver.rejectionReason && (
+                            <span style={{ fontSize: '0.7rem', color: 'var(--color-error)' }}>
+                              Reason: {ver.rejectionReason}
+                            </span>
+                          )}
+                        </div>
                       </td>
                       <td style={{ padding: '12px 16px', textAlign: 'right' }}>
                         <div style={{ display: 'inline-flex', gap: '6px' }}>
                           {ver.status === 'PENDING_HOD_APPROVAL' && (
                             <>
                               <Button
+                                variant="outline"
+                                size="sm"
+                                disabled={isUpdating}
+                                onClick={() => handleReview(ver._id || ver.id, ver.academicContextId)}
+                              >
+                                Review
+                              </Button>
+                              <Button
                                 variant="primary"
                                 size="sm"
                                 disabled={isUpdating}
-                                onClick={() => handleTransition(ver._id, 'APPROVED')}
+                                onClick={() => handleTransition(ver._id || ver.id, 'APPROVED')}
                               >
                                 Approve
                               </Button>
@@ -163,7 +184,7 @@ export default function TimetableApprovalPage() {
                                 variant="danger"
                                 size="sm"
                                 disabled={isUpdating}
-                                onClick={() => handleTransition(ver._id, 'REJECTED')}
+                                onClick={() => handleTransition(ver._id || ver.id, 'REJECTED')}
                               >
                                 Reject
                               </Button>
@@ -174,23 +195,13 @@ export default function TimetableApprovalPage() {
                               variant="success"
                               size="sm"
                               disabled={isUpdating}
-                              onClick={() => handleTransition(ver._id, 'PUBLISHED')}
+                              onClick={() => handleTransition(ver._id || ver.id, 'PUBLISHED')}
                             >
                               Publish
                             </Button>
                           )}
                           {ver.status === 'PUBLISHED' && (
                             <Badge variant="success">Active Live</Badge>
-                          )}
-                          {ver.status === 'GENERATED' && (
-                            <Button
-                              variant="secondary"
-                              size="sm"
-                              disabled={isUpdating}
-                              onClick={() => handleTransition(ver._id, 'PENDING_HOD_APPROVAL')}
-                            >
-                              Submit to HOD
-                            </Button>
                           )}
                         </div>
                       </td>
