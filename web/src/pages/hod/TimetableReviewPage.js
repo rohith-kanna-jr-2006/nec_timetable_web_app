@@ -7,6 +7,8 @@ import {
   groupSessionsByDay,
   calculateTimetableMetrics,
 } from '../../services/timetableService';
+import { transitionTimetableVersion } from '../../services/hodAllocationService';
+import { useToast } from '../../context/ToastContext';
 import { WEEK_DAYS, PERIOD_TIMINGS } from '../../constants/schedule';
 import PageHeader from '../../components/common/PageHeader';
 import Card from '../../components/common/Card';
@@ -84,6 +86,8 @@ export default function TimetableReviewPage({ portalType = 'HOD' }) {
   const [selectedClassId, setSelectedClassId] = useState(paramClassId || '');
   const [sessions, setSessions] = useState([]);
   const [tcUser, setTcUser] = useState(null);
+  const [submitting, setSubmitting] = useState(false);
+  const { showToast } = useToast();
 
   // Load available academic contexts
   useEffect(() => {
@@ -203,6 +207,24 @@ export default function TimetableReviewPage({ portalType = 'HOD' }) {
         { label: 'Timetable Review' },
       ];
 
+  const handleSubmitToHOD = async () => {
+    if (!activeVer || !activeVer._id) return;
+    try {
+      setSubmitting(true);
+      await transitionTimetableVersion(activeVer._id || activeVer.id, 'PENDING_HOD_APPROVAL');
+      showToast('Timetable submitted to HOD successfully.', 'success');
+      // Reload versions to reflect status update
+      const res = await getTimetableVersions();
+      const list = Array.isArray(res) ? res : res?.data || [];
+      setVersions(list);
+    } catch (err) {
+      console.error('[TimetableReviewPage] Submit to HOD failed:', err);
+      showToast(err.message || 'Failed to submit timetable to HOD.', 'error');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
   return (
     <div>
       <PageHeader
@@ -308,6 +330,40 @@ export default function TimetableReviewPage({ portalType = 'HOD' }) {
             )}
           </div>
         </div>
+
+        {isCoordinator && activeVer && (
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: '16px', padding: '12px 16px', backgroundColor: 'var(--color-surface)', borderRadius: 'var(--radius-md)', border: '1px solid var(--color-border-subtle)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+              <span style={{ fontSize: '0.875rem', fontWeight: 600, color: 'var(--color-on-surface)' }}>Coordinator Actions:</span>
+              {activeVer.status === 'GENERATED' && <Badge variant="warning">Generated — Awaiting TC Submission</Badge>}
+              {activeVer.status === 'PENDING_HOD_APPROVAL' && <Badge variant="primary">Pending HOD Approval</Badge>}
+              {activeVer.status === 'APPROVED' && <Badge variant="success">Approved</Badge>}
+              {activeVer.status === 'REJECTED' && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                  <Badge variant="danger">Rejected</Badge>
+                  {activeVer.rejectionReason && (
+                    <span style={{ fontSize: '0.75rem', color: 'var(--color-error)' }}>
+                      Remarks: {activeVer.rejectionReason}
+                    </span>
+                  )}
+                </div>
+              )}
+              {activeVer.status === 'PUBLISHED' && <Badge variant="success">Published</Badge>}
+            </div>
+            <div>
+              {activeVer.status === 'GENERATED' && (
+                <Button
+                  variant="primary"
+                  size="sm"
+                  onClick={handleSubmitToHOD}
+                  disabled={submitting}
+                >
+                  {submitting ? 'Submitting...' : 'Submit to HOD'}
+                </Button>
+              )}
+            </div>
+          </div>
+        )}
       </Card>
 
       {/* Grid Card */}
