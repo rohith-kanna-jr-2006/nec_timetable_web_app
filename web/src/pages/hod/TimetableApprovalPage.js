@@ -42,6 +42,14 @@ export default function TimetableApprovalPage() {
     if (newStatus === 'REJECTED') {
       rejectionReason = window.prompt('Provide statutory rejection remarks:');
       if (rejectionReason === null) return;
+      if (!rejectionReason.trim()) {
+        showToast('Rejection remarks cannot be empty.', 'error');
+        return;
+      }
+      if (rejectionReason.length > 255) {
+        showToast('Rejection remarks must be 255 characters or less.', 'error');
+        return;
+      }
     }
 
     try {
