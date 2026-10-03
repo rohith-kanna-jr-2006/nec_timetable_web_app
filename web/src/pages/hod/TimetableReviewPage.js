@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useSearchParams, useNavigate } from 'react-router-dom';
 import { getAcademicContexts } from '../../services/academicContextService';
 import {
   getClassTimetable,
@@ -16,18 +16,74 @@ import Spinner from '../../components/common/Spinner';
 import ErrorState from '../../components/common/ErrorState';
 import EmptyState from '../../components/common/EmptyState';
 
+// TC Role name constant
+const TC_ROLE_NAME = 'TimeTable Coordinator';
+
+// ─── Session Cell Component ────────────────────────────────────────────────────
+function SessionCell({ session }) {
+  if (!session) {
+    return (
+      <td style={{ padding: '8px 4px', color: 'var(--color-outline)', backgroundColor: 'transparent', minWidth: '100px' }}>
+        <span style={{ opacity: 0.4 }}>—</span>
+      </td>
+    );
+  }
+
+  const isLab = session.sessionType === 'LAB';
+  const bgColor = isLab ? 'rgba(234, 179, 8, 0.07)' : 'rgba(37, 99, 235, 0.05)';
+  const borderColor = isLab ? 'rgba(234, 179, 8, 0.22)' : 'rgba(37, 99, 235, 0.18)';
+  const accentColor = isLab ? 'var(--color-warning)' : 'var(--color-primary)';
+
+  return (
+    <td style={{ padding: '6px 4px', backgroundColor: bgColor }}>
+      <div style={{
+        padding: '7px 8px',
+        borderRadius: 'var(--radius-sm)',
+        border: `1px solid ${borderColor}`,
+        height: '100%',
+        minHeight: '90px',
+        display: 'flex',
+        flexDirection: 'column',
+        justifyContent: 'flex-start',
+        gap: '3px',
+      }}>
+        {/* Course Code */}
+        <div style={{ fontWeight: 800, fontSize: '0.75rem', color: accentColor, lineHeight: 1.2 }}>
+          {session.courseCode || 'N/A'}
+        </div>
+        {/* Course Name */}
+        <div style={{ fontSize: '0.7rem', fontWeight: 500, color: 'var(--color-on-surface)', lineHeight: 1.3, flexGrow: 1, overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>
+          {session.courseName || 'Unknown'}
+        </div>
+        {/* Room */}
+        <div style={{ fontSize: '0.65rem', color: 'var(--color-on-surface-variant)', marginTop: 'auto', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          📍 {session.room || 'TBD'}
+        </div>
+        {/* Faculty */}
+        <div style={{ fontSize: '0.65rem', color: 'var(--color-on-surface-variant)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          👤 {session.facultyName ? `${session.facultyName} (${session.facultyId})` : (session.facultyId || 'Unassigned')}
+        </div>
+      </div>
+    </td>
+  );
+}
+
 export default function TimetableReviewPage({ portalType = 'HOD' }) {
   const [searchParams, setSearchParams] = useSearchParams();
   const paramContextId = searchParams.get('academicContextId');
   const paramVersionId = searchParams.get('versionId');
+  const paramClassId = searchParams.get('classId');
 
+  const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [contexts, setContexts] = useState([]);
   const [selectedContextId, setSelectedContextId] = useState(paramContextId || '');
   const [versions, setVersions] = useState([]);
   const [selectedVersionId, setSelectedVersionId] = useState(paramVersionId || '');
+  const [selectedClassId, setSelectedClassId] = useState(paramClassId || '');
   const [sessions, setSessions] = useState([]);
+  const [tcUser, setTcUser] = useState(null);
 
   // Load available academic contexts
   useEffect(() => {
@@ -116,7 +172,7 @@ export default function TimetableReviewPage({ portalType = 'HOD' }) {
     if (selectedContextId) {
       loadSchedule();
     }
-  }, [selectedContextId, selectedVersionId, loadSchedule]);
+  }, [selectedContextId, selectedVersionId]);
 
   const activeCtx = contexts.find((c) => (c._id || c.id) === selectedContextId);
   const activeVer = versions.find((v) => (v._id || v.id) === selectedVersionId);
@@ -125,18 +181,25 @@ export default function TimetableReviewPage({ portalType = 'HOD' }) {
   const periods = ['P1', 'P2', 'P3', 'P4', 'P5', 'P6', 'P7'];
 
   const isCoordinator = portalType === 'Coordinator';
-  const pageTitle = 'Class Timetable Review Matrix';
+  const isHOD = portalType === 'HOD';
+  const pageTitle = isHOD ? 'Class Timetable Review Matrix' : isCoordinator ? 'Timetable Review' : 'Timetable Review';
   const pageDescription = isCoordinator
     ? 'Review generated timetable sessions across Computer Science & Engineering classes before final publication.'
-    : 'Comprehensive master grid review across all Computer Science & Engineering classes before executive ratification.';
+    : isHOD
+    ? 'Comprehensive master grid review across all Computer Science & Engineering classes before executive ratification.'
+    : 'Review timetable sessions across Computer Science & Engineering classes.';
   const breadcrumbs = isCoordinator
     ? [
         { label: 'Coordinator Portal', path: '/coordinator/dashboard' },
         { label: 'Timetable Design', path: '/coordinator/design' },
         { label: 'Timetable Review' },
       ]
-    : [
+    : isHOD
+    ? [
         { label: 'HOD Portal', path: '/hod/dashboard' },
+        { label: 'Timetable Review' },
+      ]
+    : [
         { label: 'Timetable Review' },
       ];
 
@@ -322,72 +385,7 @@ export default function TimetableReviewPage({ portalType = 'HOD' }) {
                       </td>
                       {periods.map((period) => {
                         const s = sessionMap[period];
-                        if (!s) {
-                          return (
-                            <td
-                              key={period}
-                              style={{
-                                padding: '10px 4px',
-                                color: 'var(--color-outline)',
-                                backgroundColor: 'transparent',
-                              }}
-                            >
-                              —
-                            </td>
-                          );
-                        }
-
-                        const isLab = s.sessionType === 'LAB';
-                        return (
-                          <td
-                            key={period}
-                            style={{
-                              padding: '8px 4px',
-                              backgroundColor: isLab ? 'rgba(234, 179, 8, 0.08)' : 'rgba(37, 99, 235, 0.06)',
-                            }}
-                          >
-                            <div
-                              style={{
-                                padding: '6px',
-                                borderRadius: 'var(--radius-sm)',
-                                border: `1px solid ${
-                                  isLab ? 'rgba(234, 179, 8, 0.25)' : 'rgba(37, 99, 235, 0.2)'
-                                }`,
-                              }}
-                            >
-                              <div
-                                style={{
-                                  fontWeight: 700,
-                                  color: isLab ? 'var(--color-warning)' : 'var(--color-primary)',
-                                }}
-                              >
-                                {s.courseCode}
-                              </div>
-                              <div
-                                style={{
-                                  fontSize: '0.75rem',
-                                  fontWeight: 500,
-                                  marginTop: '2px',
-                                  overflow: 'hidden',
-                                  textOverflow: 'ellipsis',
-                                  whiteSpace: 'nowrap',
-                                }}
-                                title={s.courseName}
-                              >
-                                {s.courseName}
-                              </div>
-                              <div
-                                style={{
-                                  fontSize: '0.7rem',
-                                  color: 'var(--color-on-surface-variant)',
-                                  marginTop: '4px',
-                                }}
-                              >
-                                Room: {s.room || 'TBD'} • {s.facultyName ? `${s.facultyName} (${s.facultyId})` : s.facultyId}
-                              </div>
-                            </div>
-                          </td>
-                        );
+                        return <SessionCell key={period} session={s} />;
                       })}
                     </tr>
                   );

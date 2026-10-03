@@ -5,102 +5,182 @@
 **NEC Faculty Timetable & Workload Management System**  
 Institution: Nandha Engineering College (Autonomous), Erode
 
-This repository contains:
-- an existing React Native / Expo mobile application used as a **reference/archive**
-- a Node.js + Express.js + MongoDB + Mongoose backend
-- a newer React web application under `web/`
+The current product-development target is the **web application** under `web/`.
 
-### Final Product Target
+Repository areas include:
+- `web/` — current React web application
+- `backend/` — Node.js/Express/MongoDB backend
+- legacy mobile/Expo material — reference/archive only unless explicitly requested
+- `docs/` — product, design, architecture and workflow documentation
 
-**The final product is WEB APPLICATION ONLY.**
+## Product target
 
-The React Native / Expo application is **not** a current product-development target. Use it only as:
-- UI/UX reference
-- workflow reference
-- feature/reference documentation
-- source of existing business-flow ideas when useful
+The final product target for current development is the **web application only**.
 
-Do **not** spend implementation effort expanding the mobile application unless explicitly requested.
+Do not expand the legacy mobile/Expo application unless the user explicitly requests it.
 
----
+## Canonical context
 
-## Core Technology Rules
+Before substantial work, use these files as the primary agent context:
+
+```text
+AGENTS.md
+CLAUDE.md
+
+docs/
+├── PRD.md
+├── DESIGN_SYSTEM.md
+└── ARCHITECTURE.md
+```
+
+Supporting `docs/*.md` files may contain detailed institutional workflows, implementation specifications, curriculum data, screen maps and audits. Read only the supporting documents relevant to the current task.
+
+`ai/` is not a project context directory and should not be recreated.
+
+## Technology rules
 
 ### Web
+
 - React
 - JavaScript only
 - React Router
-- CSS
-- Webpack / Babel as already established in the `web/` project
+- Existing CSS/styling system
+- Webpack/Babel already used by `web/`
 
 ### Backend
+
 - Node.js
 - Express.js
 - MongoDB
 - Mongoose
 - JWT authentication
-- Role-based access control (RBAC)
+- RBAC
 
-### Mandatory conventions
+### Never introduce without explicit approval
 
-- Use **JavaScript only**.
-- Do **not** introduce TypeScript.
-- Do **not** create `.ts` or `.tsx` files.
-- Do **not** migrate the project to Vite.
-- Do **not** replace the existing Webpack/Babel setup without explicit approval.
-- Prefer small, maintainable modules over large monolithic files.
-- Reuse existing components, services, tokens, and API helpers before creating duplicates.
-- Preserve the existing backend API contracts unless a contract change is explicitly required and approved.
+- TypeScript
+- `.ts`
+- `.tsx`
+- Vite
+- Next.js
+- Angular
+- a replacement frontend stack
+- a second frontend application
+- duplicate pages/routes for functionality already supported by existing pages
 
----
+Do not move backend-owned business logic into the React frontend.
 
-## Repository Structure
+## Role terminology
 
-Important top-level areas:
+Known backend role identifiers remain:
 
 ```text
-backend/
-  src/
-    models/
-    controllers/
-    middleware/
-    services/
-    validators/
-    routes/
-    seeds/
-
-web/
-  public/
-  src/
-    components/
-    context/
-    layouts/
-    pages/
-    routes/
-    services/
-    styles/
-  tests/
-
-docs/
+FACULTY
+AC
+HOD
+ADMIN
 ```
 
-The repository also contains the legacy Expo/React Native mobile application. Treat it as reference material unless explicitly asked to modify it.
+`AC` may remain the internal backend identifier. The user-facing frontend terminology is:
 
----
+```text
+Time Table Coordinator
+TC
+```
 
-## Existing Backend Responsibilities
+Do not rename the backend role identifier merely to change user-facing wording.
 
-The backend is the authoritative source for:
-- authentication
-- authorization
-- workload calculation
-- timetable validation
-- timetable conflict detection
-- allocation rules
-- persistent institutional data
-- API-level business rules
+## Role ownership
 
-Known route groups include:
+### HOD
+
+HOD-facing frontend responsibilities include:
+- academic context selection
+- authoritative Course → Faculty allocation
+- class advisor workflow
+- timetable review
+- approval
+- rejection with remarks
+- publication where backend-authorized
+
+### Time Table Coordinator
+
+TC-facing frontend responsibilities include:
+- academic context/cohort selection
+- HOD-approved faculty allocation visibility
+- timetable design/generation through existing backend APIs
+- generated timetable review
+- submission/handover to HOD
+
+TC UI must not override HOD faculty-allocation authority.
+
+### Backend
+
+Backend remains authoritative for:
+- authentication/authorization
+- course applicability
+- faculty eligibility
+- HOD allocation
+- workload calculations
+- timetable generation/optimization
+- conflict detection
+- version lifecycle
+- approval
+- publication
+
+## Timetable lifecycle
+
+The frontend must represent backend-authoritative lifecycle states accurately.
+
+```text
+NO_TIMETABLE / TIMETABLE_NOT_GENERATED
+        ↓
+GENERATED
+        ↓
+PENDING_HOD_APPROVAL
+        ├────────→ REJECTED + rejectionReason
+        ↓
+APPROVED
+        ↓
+PUBLISHED
+```
+
+The frontend does not independently decide whether a timetable is approved or published.
+
+## Current web architecture
+
+The web frontend uses:
+
+```text
+web/
+├── src/
+│   ├── components/
+│   ├── context/
+│   ├── layouts/
+│   ├── pages/
+│   ├── routes/
+│   ├── services/
+│   ├── constants/
+│   └── styles/
+└── tests/
+```
+
+Follow the existing structure. Reuse existing components, services, routes and design tokens before creating new ones.
+
+The frontend communicates with the backend through its existing API/service layer. The frontend never accesses MongoDB directly.
+
+## API rules
+
+Before modifying or adding API integration:
+
+1. inspect the actual backend route;
+2. inspect the controller/service implementation;
+3. verify params/query/body;
+4. verify response fields;
+5. verify authorization;
+6. reuse the existing frontend service layer.
+
+Known API groups include:
 
 ```text
 /api/health
@@ -119,515 +199,311 @@ Known route groups include:
 /api/substitutes
 ```
 
-Important authentication endpoints include:
+Do not invent endpoints or fabricate response data.
+
+## Authentication
+
+The existing web authentication flow is JWT-based and should remain compatible with the backend contract:
 
 ```text
+Login UI
+  ↓
 POST /api/auth/login
-POST /api/auth/register
-GET  /api/auth/me
+  ↓
+Persist required session/token data
+  ↓
+Restore through /api/auth/me when appropriate
+  ↓
+AuthContext
+  ↓
+Protected role-aware routes
 ```
 
-Frontend authentication uses JWT Bearer authentication.
+Inspect the actual backend response before changing authentication.
 
-**Do not duplicate authoritative backend business rules in React merely for convenience.**  
-Frontend logic may control presentation and interaction, but the backend remains the source of truth.
+An authenticated user who is unauthorized for a route is not the same as an unauthenticated user. Preserve explicit role handling.
 
----
+## UI/UX rules
 
-## Roles
+Follow `docs/DESIGN_SYSTEM.md` and the existing application UI.
 
-Known application roles:
+The current HOD Faculty Allocation interface is the baseline for incremental allocation UI changes.
 
-```text
-FACULTY
-AC
-HOD
-ADMIN
-```
-
-Role behavior must remain aligned with backend authorization.
-
-The frontend should:
-- hide navigation/actions that are not relevant to the current role
-- protect routes
-- handle unauthorized access explicitly
-- never treat frontend route protection as a replacement for backend authorization
-
-An authenticated user with an invalid/unauthorized role for a route should not be treated as an unauthenticated user.
-
----
-
-## Web Frontend Architecture
-
-The web application is being built as a desktop-first institutional web application.
-
-Current foundational areas include:
-- shared UI components
-- layouts
-- sidebar
-- topbar
-- page container
+Preserve:
+- sidebar/navigation
 - breadcrumbs
-- API service layer
-- authentication context
-- protected routes
-- role-aware route groups
-- login page
+- page headers
+- authority indicators
+- context selectors
+- context summary
+- existing tables/cards/controls
 
-The current web branch already contains Phase 1 foundation work and Phase 2 authentication/protected-route work.
+Change only the UI required for the approved feature or bug fix.
 
-Do not recreate these from scratch. Audit and extend them.
+Do not:
+- introduce raw feature-specific colors when existing tokens work;
+- create duplicate components for existing patterns;
+- create generic Faculty 1/2/3 controls when semantic roles exist;
+- hide critical controls on mobile;
+- create page-wide horizontal scrolling;
+- use sample/hardcoded timetable data when an API exists.
 
----
+## Faculty allocation rules
 
-## Authentication Rules
-
-The web authentication flow should:
-
-1. collect login credentials
-2. call the backend login endpoint
-3. receive the authenticated session/token
-4. persist the necessary session information
-5. restore the session through `/api/auth/me` when appropriate
-6. expose the authenticated user through `AuthContext`
-7. protect role-specific routes
-8. clear the session on logout
-
-Before changing authentication behavior, inspect the real backend response shape.
-
-Do not assume an API response structure when the backend implementation can be inspected.
-
----
-
-## Current Authentication Implementation to Audit
-
-Known files include:
+### THEORY
 
 ```text
-web/src/context/AuthContext.js
-web/src/services/authService.js
-web/src/routes/ProtectedRoute.js
-web/src/routes/AppRoutes.js
-web/src/pages/auth/LoginPage.js
-web/src/components/layout/Topbar.js
-web/tests/auth.test.js
+Course → exactly 1 faculty
 ```
 
-Particular audit points:
-- backend login response compatibility
-- JWT storage and API token injection
-- `/auth/me` session restoration
-- logout cleanup
-- role matching
-- unauthorized-role behavior
-- loading state during session restoration
-- session-expired handling
-- ADMIN default routing
-- error handling
-- live API authentication tests
-- production build compatibility
-
-Known implementation concern from the current review:
-- `ProtectedRoute` previously redirected authenticated-but-unauthorized users to their default dashboard. Prefer an explicit access-denied/forbidden state rather than silently redirecting them, unless the existing product design clearly requires another behavior.
-
-Do not change this assumption blindly. Inspect the current code and choose the smallest evidence-based fix.
-
----
-
-## Existing Role-Based Web Areas
-
-The intended web application contains role-oriented areas such as:
-
-### Faculty
-- Faculty Dashboard
-- My Timetable
-- Weekly Timetable
-- Workload
-- Notifications
-- Profile
-
-### Coordinator / AC
-- Coordinator Dashboard
-- Course Selection
-- Faculty Assignment
-- Conflict Detection
-- Validation
-- Optimization / timetable workflow
-
-### HOD
-- HOD Dashboard
-- Academic Context
-- Faculty Allocation
-- Allocation Review
-- Timetable Review
-- Approval
-- Approval Details
-- Class Advisor
-- Faculty Input
-- Notifications
-- Profile
-
-Use the existing docs and existing mobile/reference screens as the source for detailed workflows.
-
-Do not invent institutional rules when the repository already documents them.
-
----
-
-## Design System
-
-The existing reference design uses a dark institutional navy / blue visual language.
-
-Known reference tokens include:
+### LAB
 
 ```text
-Primary Navy:        #001428
-Primary Container:   #0f2942
-Secondary Blue:      #0051d5
-Accent Blue:         #2563eb
+Primary / Theory-linked Faculty    REQUIRED
+Additional Faculty                REQUIRED
+Optional 3rd Faculty              OPTIONAL
 
-Lab / Tertiary:
-#002e1d
-#68dba9
-#85f8c4
-
-Canvas:
-#f8f9ff
-
-Surfaces:
-#e5eeff
-#eff4ff
-#ffffff
+Minimum = 2
+Maximum = 3
 ```
 
-Reference typography includes:
-- Inter
-- Outfit
-- JetBrains Mono
+Primary is backend-authoritative/theory-linked where configured.
 
-The web implementation should reuse the existing design tokens and components rather than introducing unrelated visual systems.
+### MC
 
----
+Allocation is policy-driven.
 
-## Timetable Model
-
-Known timetable structure:
-- Monday to Friday
-- Periods P1 to P7
-- 35 regular weekly slots
-- breaks between periods
-
-Known lifecycle:
+Supported examples include:
 
 ```text
-NO_TIMETABLE
-    ↓
-GENERATED / DRAFT
-    ↓
-PENDING_HOD_APPROVAL
-    ↓
-APPROVED / REJECTED
-    ↓
-PUBLISHED
+MC_OPTIONAL_MAPPING
+→ Induction Programme
+→ Faculty optional
+→ timetable mapping optional
+
+MC_DEPARTMENT
+→ Indian Constitution
+→ respective department faculty
+
+MC_SAS
+→ Maths/BME faculty required
+→ English faculty required
 ```
 
-Do not bypass or redefine this lifecycle in frontend code.
+Do not replace policy-driven behavior with course-name matching when backend policy data is available.
 
----
+## Multi-faculty timetable rule
 
-## Workload Rules
+One LAB class session may contain multiple assigned faculty.
 
-Workload calculation is backend-authoritative.
+The class timetable must remain one class session. Do not duplicate a class session in React merely because multiple faculty are assigned.
 
-Known allocation rule categories include:
-- `SINGLE_FACULTY`
-- `PRIMARY_PLUS_ADDITIONAL`
-- `MINIMUM_TWO`
-- `STAFFS_HANDLED`
+Faculty timetable views may legitimately display the session for each assigned faculty when the backend representation requires it.
 
-Special handling exists for institutional course patterns such as labs and other multi-faculty allocations.
+## Workflow pages
 
-Do not reproduce workload formulas independently in frontend pages. Display backend-calculated values and use frontend-only calculations only for presentation-level needs.
+Prefer existing shared pages where role-specific actions can be supported.
 
----
+In particular, Coordinator and HOD timetable review should reuse the existing timetable review implementation instead of creating duplicate review pages.
 
-## UI / UX Principles
+Review scope must preserve:
 
-Build a professional institutional desktop web application.
+```text
+academicContextId
++
+Timetable Version identity
+```
 
-Priorities:
-1. correctness
-2. clarity
-3. consistency
-4. accessibility
-5. maintainability
-6. visual polish
+## Branch policy for Claude Code Desktop
 
-Prefer:
-- reusable components
-- consistent spacing
-- clear hierarchy
-- responsive desktop layouts
-- useful empty/loading/error states
-- readable tables
-- clear status badges
-- sensible confirmation dialogs for destructive actions
+Claude Code Desktop works ONLY on:
 
-Avoid:
-- unnecessary animations
-- duplicated components
-- giant page files
-- hard-coded business rules
-- fake production data when an API already exists
-- placeholder UI that is presented as complete functionality
+```text
+rohith-frontend
+```
 
----
-
-## Data / API Rules
-
-Before creating a new frontend API call:
-
-1. search the backend routes/controllers
-2. confirm the endpoint and HTTP method
-3. confirm request body/query/params
-4. confirm response structure
-5. confirm authorization requirements
-6. implement the smallest compatible client call
-
-Use the existing API service layer where possible.
-
-Do not silently change backend contracts from the frontend.
-
----
-
-## Testing Rules
-
-Before declaring a phase complete, run the relevant checks.
-
-At minimum:
+Before editing:
 
 ```bash
-npm install
-npm run build
-```
-
-Run the available backend/frontend tests relevant to the changed area.
-
-For authentication work, inspect/run:
-
-```text
-web/tests/auth.test.js
-```
-
-Do not claim tests passed unless they were actually executed and the result is known.
-
-If a test cannot run because a dependency/service is unavailable, report the exact blocker.
-
----
-
-## Development Workflow
-
-Before making changes:
-
-```bash
-git status
 git branch --show-current
+git status
 git log --oneline -5
 git remote -v
 ```
 
-Then inspect the relevant files.
+If the current branch is not `rohith-frontend`, stop. Do not switch automatically.
 
-Never assume a feature is missing until:
-- the branch is verified
-- Git history is checked
-- the existing source is inspected
-
-Avoid destructive operations such as:
-- reset --hard
-- force push
-- deleting branches
-- deleting working files
-- rewriting another developer's work
-
-unless explicitly approved.
-
----
-
-## Current Web Branch Context
-
-The current working branch is expected to be:
+Jules works separately on:
 
 ```text
-feature/web-frontend-rohith
+rohith-frontend-102292981560789839
 ```
 
-It was created from the existing remote web implementation.
+Treat the Jules branch as read-only reference unless the user explicitly asks to transfer work.
 
-The remote web work includes these commits:
+Do not:
+- merge Jules branch;
+- cherry-pick Jules commits;
+- rebase onto Jules branch;
+- merge/rebase `ragul-backend` into `rohith-frontend`;
+- modify `main`;
+- modify `ragul-backend`;
+- force-push.
 
-```text
-1eebed1  feat(web): add Phase 1 web application foundation
-32070c0  feat(web): add authentication context, protected routes, and updated layouts
+Never use:
+
+```bash
+git reset --hard
+git clean -fd
+git push --force
+git add .
 ```
 
-Do not recreate or discard this work.
+Stage exact task files only.
 
-Before changing it, audit the current state.
+## Development workflow
 
----
+For a requested implementation task:
 
-## Phase / Ownership Rules
+### 1. Inspect
 
-### Rohith
-Primary owner:
-- React web frontend
-- web architecture
-- shared UI
-- layouts/navigation
-- authentication frontend integration
-- role-aware frontend behavior
-- frontend API integration
-- final frontend integration
-- frontend validation/testing
+Read the canonical docs and only the relevant source files.
 
-### Ragul
-Primary owner:
-- backend
-- Express APIs
-- MongoDB/Mongoose
-- controllers/services/routes
-- backend auth/JWT/RBAC
-- backend business logic
-- backend tests
+### 2. Scope
 
-Do not modify another person's owned area unless:
-- the change is required for integration, and
-- the reason is documented, and
-- the change is coordinated/approved.
+Identify the smallest coherent set of files required.
 
----
+A prompt may contain two related phases/tasks. Complete them in the order requested rather than combining unrelated work.
 
-## Phase Plan
+### 3. Implement
 
-The current overall web migration follows:
+Make the smallest safe change that satisfies the task.
 
-```text
-Phase 1 — Web Foundation
-Phase 2 — Authentication & RBAC
-Phase 3 — Faculty Web Portal
-Phase 4 — Coordinator Portal
-Phase 5 — HOD Portal
-Phase 6 — Integration Testing
-Phase 7 — Final UI/UX Validation
+Do not perform speculative cleanup or unrelated refactoring.
+
+### 4. Validate
+
+Run the actual commands available in the repository.
+
+For the current `web/package.json`, known scripts include:
+
+```bash
+npm run build
+npm test
 ```
 
-Complete each phase with:
-1. implementation
-2. validation
-3. build/tests
-4. review of changed files
-5. user approval
-6. Git commit
-7. Git push
-8. remote verification
+Do not claim `npm run lint` or `npm run test:e2e` unless those scripts actually exist in the current package configuration.
 
-### Git approval rule
+Use Playwright MCP for relevant browser/UI/integration validation.
 
-**Never commit/push a completed phase without user approval.**
+### 5. Review
 
-Never claim that a phase was pushed unless the push was actually performed and verified.
-
----
-
-## Documentation Rules
-
-Use `docs/` as the primary source for project-specific workflows and institutional requirements.
-
-Existing documentation includes architecture, AC/timetable workflows, faculty workload workflows, HOD implementation, screen maps, and audits.
-
-Read the relevant document before implementing a workflow.
-
-Do not silently replace repository-specific terminology with generic product terminology.
-
----
-
-## How Claude Should Work
-
-For every substantial task:
-
-### Step 1 — Inspect
-- git state
-- relevant source files
-- relevant backend endpoints
-- relevant docs
-
-### Step 2 — Report
-State:
-- what already exists
-- what is missing
-- what needs modification
-- any risks or contract mismatches
-
-### Step 3 — Implement
-Make the smallest coherent set of changes.
-
-### Step 4 — Validate
-Run:
-- build
-- relevant tests
-- lint/type/static checks if they already exist
-
-### Step 5 — Review
 Check:
-- changed files
 - API compatibility
 - role behavior
-- UI consistency
-- error states
-- regressions
+- loading/empty/error states
+- responsive behavior
+- accessibility
+- visual consistency
+- changed-file scope
 
-### Step 6 — Handoff
-Report:
-- files changed
-- what was implemented
-- tests/build results
-- remaining issues
-- whether commit/push was intentionally left pending approval
+Run:
 
----
+```bash
+git diff --stat
+git diff --check
+git status
+```
 
-## ACTIVE TASK
+### 6. Commit/push
 
-The current active frontend implementation task is:
+Do not commit or push automatically unless the current task explicitly authorizes it.
 
-docs/ (NEC Timetable Web App Architecture & Specifications)
+When authorized:
 
-When working on the web frontend, read and execute this task file.
+```text
+Claude → origin/rohith-frontend only
+```
 
-Do not infer a different frontend task from repository history.
+Never push `main`, `ragul-backend`, or the Jules branch from Claude Code Desktop.
 
-Do not stop at an audit when the active task explicitly requires implementation.
+## Playwright rules
 
-The active task file defines the current frontend recovery scope and Definition of Done.
+Use Playwright MCP when browser validation is relevant.
 
-## Important Guardrails
+Do not call a page load a functional PASS.
 
-- Do not clone the repository again when working in the existing checkout.
-- Do not create a second replacement web application.
-- Do not migrate to TypeScript.
-- Do not migrate to Vite.
-- Do not develop the mobile application as the final product.
-- Do not duplicate backend business logic in React.
-- Do not invent APIs.
-- Do not claim an endpoint works without checking it.
-- Do not claim tests passed without running them.
-- Do not overwrite existing developer work merely to simplify the implementation.
-- Prefer evidence from the repository over assumptions.
+A functional PASS means the interaction was executed and the expected resulting state was observed.
 
----
+Classify unavailable test cases as:
 
-## Immediate Next Step
+```text
+PASS
+FAIL
+NOT TESTED
+ENVIRONMENT ISSUE
+```
 
-Before starting the next feature phase, Claude should audit the existing Phase 1 and Phase 2 web implementation, especially authentication, route protection, API integration, and build/test health.
+Do not fabricate test data merely to make a workflow appear complete.
 
-Only after the audit is complete should feature work continue.
+Required responsive widths for relevant screens:
+
+```text
+360
+390
+430
+768
+1024
+1280
+1366
+1600
+1920
+```
+
+## Documentation maintenance
+
+Keep these responsibilities clear:
+
+```text
+AGENTS.md               → agent operating rules
+CLAUDE.md               → Claude Code Desktop context
+
+docs/PRD.md             → what is being built and done criteria
+docs/DESIGN_SYSTEM.md   → visual language and UI rules
+docs/ARCHITECTURE.md    → structure, data flow, boundaries
+```
+
+Update the appropriate document only when the product, architecture, supported workflow, component pattern, or agent process materially changes.
+
+Do not create duplicate context files under `ai/`.
+
+## Stop conditions
+
+Stop and ask one specific question when:
+
+- the actual backend contract contradicts the documented product behavior;
+- two valid business interpretations would produce different behavior;
+- a new dependency is required;
+- a new route/page is necessary but cannot safely extend an existing route;
+- TypeScript/Vite/architecture migration is required;
+- an undocumented allocation policy is requested;
+- multi-faculty workload semantics are unclear.
+
+Do not stop merely because unrelated files exist or because the repository contains legacy mobile/reference code.
+
+## Definition of done
+
+A substantial frontend task is complete when:
+
+- requested behavior is implemented;
+- existing unrelated functionality is preserved;
+- API data and business states are authoritative;
+- UI follows the design system;
+- loading/empty/error states are handled;
+- responsive behavior is validated where relevant;
+- accessibility is preserved;
+- actual build/tests are run;
+- Playwright validation is run where relevant;
+- final diff is reviewed;
+- relevant documentation is updated when required;
+- the report states exactly what changed and what remains unverified.

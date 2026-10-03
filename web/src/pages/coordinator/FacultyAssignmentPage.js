@@ -167,7 +167,7 @@ export default function FacultyAssignmentPage() {
     <div>
       <PageHeader
         title="Course — Faculty Allocation Matrix"
-        description="Authoritative course-to-faculty allocations approved by the Head of Department (HOD) across the 12 target class cohorts for Academic Year 2026-27 (Odd Semester). Academic Coordinators design timetable schedules adhering strictly to these allocations."
+        description="Authoritative course-to-faculty allocations approved by the Head of Department (HOD) across the 12 target class cohorts for Academic Year 2026-27 (Odd Semester). TimeTable Coordinators design timetable schedules adhering strictly to these allocations."
         breadcrumbs={[
           { label: 'Coordinator Portal', path: '/coordinator/dashboard' },
           { label: 'Faculty Allocation Matrix' },
@@ -209,7 +209,7 @@ export default function FacultyAssignmentPage() {
               <Badge variant="success">HOD ALLOCATED</Badge>
             </div>
             <p style={{ margin: '6px 0 0 0', fontSize: '0.875rem', color: 'var(--color-on-surface-variant)', lineHeight: 1.5 }}>
-              Head of Department (HOD) is the authoritative decision maker for Course ➔ Faculty allocation. Academic Coordinators prepare timetable schedules by assigning timeslots in the Timetable Designer adhering strictly to these allocations.
+              Head of Department (HOD) is the authoritative decision maker for Course ➔ Faculty allocation. TimeTable Coordinators prepare timetable schedules by assigning timeslots in the Timetable Designer adhering strictly to these allocations.
             </p>
           </div>
         </div>
@@ -437,7 +437,7 @@ export default function FacultyAssignmentPage() {
                 Coordinator Course Preference Notes ({handlers.length})
               </h3>
               <p style={{ margin: '4px 0 0 0', fontSize: '0.8125rem', color: 'var(--color-outline)' }}>
-                Internal notes and instructor recommendations maintained by Academic Coordinators.
+                Internal notes and instructor recommendations maintained by TimeTable Coordinators.
               </p>
             </div>
           </div>

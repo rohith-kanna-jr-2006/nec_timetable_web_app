@@ -42,6 +42,14 @@ export default function TimetableApprovalPage() {
     if (newStatus === 'REJECTED') {
       rejectionReason = window.prompt('Provide statutory rejection remarks:');
       if (rejectionReason === null) return;
+      if (!rejectionReason.trim()) {
+        showToast('Rejection remarks cannot be empty.', 'error');
+        return;
+      }
+      if (rejectionReason.length > 255) {
+        showToast('Rejection remarks must be 255 characters or less.', 'error');
+        return;
+      }
     }
 
     try {
@@ -128,7 +136,7 @@ export default function TimetableApprovalPage() {
                         {ver.year || 'CSE'} {ver.section ? `'${ver.section}'` : ''}
                       </td>
                       <td style={{ padding: '12px 16px', color: 'var(--color-on-surface-variant)' }}>
-                        {ver.generatedBy || 'Academic Coordinator'}
+                        {ver.generatedBy || 'TimeTable Coordinator'}
                       </td>
                       <td style={{ padding: '12px 16px' }}>
                         <Badge

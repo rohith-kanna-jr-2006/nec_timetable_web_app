@@ -373,7 +373,7 @@ export default function HODDashboard() {
                       Version {v.versionLabel || 'v1.0'} • {v.academicYear} ({v.semester})
                     </div>
                     <div style={{ fontSize: '0.75rem', color: 'var(--color-on-surface-variant)', marginTop: '2px' }}>
-                      Cohort: {v.year || 'All Years'} {v.section ? `'${v.section}'` : ''} • Submitted by: {v.generatedBy || 'AC'}
+                      Cohort: {v.year || 'All Years'} {v.section ? `'${v.section}'` : ''} • Submitted by: {v.generatedBy || 'TC'}
                     </div>
                   </div>
                   <Button

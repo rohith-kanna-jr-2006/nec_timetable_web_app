@@ -76,7 +76,7 @@ export default function AllocationReviewPage() {
     <div>
       <PageHeader
         title="Allocation Review & Nomination Audit"
-        description="Side-by-side audit of Academic Coordinator recommended candidate pools against final HOD faculty allocations."
+        description="Side-by-side audit of TimeTable Coordinator recommended candidate pools against final HOD faculty allocations."
         breadcrumbs={[
           { label: 'HOD Portal', path: '/hod/dashboard' },
           { label: 'Allocation Review' },
@@ -116,7 +116,7 @@ export default function AllocationReviewPage() {
                 <tr style={{ backgroundColor: 'var(--color-surface-container-low)', textAlign: 'left', borderBottom: '1px solid var(--color-surface-container)' }}>
                   <th style={{ padding: '12px 16px', fontWeight: 600 }}>Course</th>
                   <th style={{ padding: '12px 16px', fontWeight: 600 }}>Cohort</th>
-                  <th style={{ padding: '12px 16px', fontWeight: 600 }}>AC Nominated Pool</th>
+                  <th style={{ padding: '12px 16px', fontWeight: 600 }}>TC Nominated Pool</th>
                   <th style={{ padding: '12px 16px', fontWeight: 600 }}>Assigned Faculty</th>
                   <th style={{ padding: '12px 16px', fontWeight: 600 }}>Status</th>
                   <th style={{ padding: '12px 16px', fontWeight: 600, textAlign: 'right' }}>Actions</th>
@@ -148,7 +148,7 @@ export default function AllocationReviewPage() {
                             ))}
                           </div>
                         ) : (
-                          <span style={{ color: 'var(--color-outline)', fontSize: '0.8125rem' }}>No AC pool</span>
+                          <span style={{ color: 'var(--color-outline)', fontSize: '0.8125rem' }}>No TC pool</span>
                         )}
                       </td>
                       <td style={{ padding: '12px 16px' }}>

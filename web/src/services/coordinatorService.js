@@ -1,6 +1,6 @@
 /**
  * Coordinator Service for Web Application
- * Handles API calls for Academic Coordinator workflows:
+ * Handles API calls for TimeTable Coordinator workflows:
  * - Candidate faculty handlers (/api/course-faculty-handlers)
  * - Timetable generation / drafts (/api/timetable)
  * - Academic contexts (/api/academic-contexts)

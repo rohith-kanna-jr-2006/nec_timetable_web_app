@@ -9,7 +9,7 @@ export default function CoordinatorDashboardPlaceholder() {
   return (
     <div>
       <PageHeader
-        title="Academic Coordinator Operations Console"
+        title="TimeTable Coordinator Operations Console"
         description="Curriculum subject-handler nomination, timetable solver execution, conflict detection, and draft validation."
         breadcrumbs={
           <Breadcrumbs
@@ -63,10 +63,10 @@ export default function CoordinatorDashboardPlaceholder() {
 
       <Card title="Operational Pipeline Status">
         <p className="text-muted" style={{ marginBottom: 16, wordBreak: 'break-word' }}>
-          Academic Coordinator operational workflows are structured for multi-device management: Course Selection → Faculty Assignment → Conflict Detection → Validation → Optimization Solver → Submit to HOD.
+          TimeTable Coordinator operational workflows are structured for multi-device management: Course Selection → Faculty Assignment → Conflict Detection → Validation → Optimization Solver → Submit to HOD.
         </p>
         <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
-          <Badge variant="secondary" dot>AC Layout Verified</Badge>
+          <Badge variant="secondary" dot>TC Layout Verified</Badge>
           <Badge variant="neutral">Multi-Device Primitives Ready</Badge>
         </div>
       </Card>

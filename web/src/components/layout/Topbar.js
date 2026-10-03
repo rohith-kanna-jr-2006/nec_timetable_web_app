@@ -26,7 +26,7 @@ export default function Topbar({
   };
 
   const displayName = user?.name || 'Faculty Member';
-  const displayRole = user?.role || 'FACULTY';
+  const displayRole = user?.role === 'AC' ? 'TC' : (user?.role || 'FACULTY');
 
   return (
     <header className="ui-topbar">
@@ -72,7 +72,7 @@ export default function Topbar({
               className="btn btn-subtle btn-sm"
               style={{ fontSize: '0.75rem', padding: '4px 8px' }}
             >
-              Coord
+              TC
             </NavLink>
           )}
           {(user?.role === 'HOD' || user?.role === 'ADMIN') && (
