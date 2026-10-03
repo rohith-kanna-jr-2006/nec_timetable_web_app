@@ -1,86 +1,195 @@
 # AGENTS.md
 
-Instructions for any AI coding agent working in this project
-(Claude Code, Cursor, Codex, Copilot). Read this whole file before doing anything.
+Repository-wide instructions for any AI coding agent (Claude Code, Cursor,
+Codex, Copilot) working on the **NEC Timetable Web App**.
 
-## 01 Purpose
+This is a **full-stack** product with two owners:
 
-[Product name] is [one line from docs/PRD.md].
-Your job is to extend it without breaking what exists, in the style already
-established. When in doubt, match what is there.
+| Domain | Owner | Code | Documentation |
+| --- | --- | --- | --- |
+| Frontend | **Rohith** | `web/` | `docs/frontend/` |
+| Backend | **Ragul** | `backend/` | `docs/backend/` |
 
-## 02 Before you start
+Read this file, identify the task's owner, then read that owner's `AGENTS.md`.
 
-Do these in order, every session:
+---
 
-1. Read docs/PRD.md for what we are building and what is out of scope.
-2. Read docs/DESIGN_SYSTEM.md for every visual decision. Use its tokens.
-3. Read docs/ARCHITECTURE.md for where code lives and what may touch what.
-4. Check the existing ui components before creating a new one.
-5. Look at the open issues or task list before proposing new work.
-6. Restate the task in one or two sentences and list the files you expect
-   to touch. Wait for a go-ahead if that list is longer than five files.
+## 01 Identify the task before acting
 
-## 03 General rules
+```text
+About web/src, pages, components, routes, UI, styling
+    -> FRONTEND    -> read docs/frontend/AGENTS.md and the docs/frontend/ set
 
-- Follow the design system. If a value is not in DESIGN_SYSTEM.md, ask. Do not invent it.
-- Keep responsibilities where ARCHITECTURE.md puts them. No business logic in pages or components.
-- Reuse before creating. Search the codebase for an existing helper or component first.
+About backend/src, routes, controllers, services, models, database,
+API contracts, solver, or tests in backend/tests
+    -> BACKEND     -> read docs/backend/AGENTS.md and the docs/backend/ set
+
+Changes both sides (an API contract AND its consumers)
+    -> CROSS-STACK -> read BOTH sets, plus backend/API.md
+```
+
+If you cannot classify the task, ask before editing.
+
+---
+
+## 02 Document hierarchy
+
+```text
+                     ROOT AGENTS.md
+                           |
+                 identify task ownership
+                           |
+       +-------------------+-------------------+
+       |                                       |
+   FRONTEND                                 BACKEND
+       |                                       |
+ docs/frontend/                          docs/backend/
+   AGENTS.md          <-- read order -->     AGENTS.md
+   PRD.md                                  PRD.md
+   DESIGN_SYSTEM.md                       DESIGN_SYSTEM.md
+   ARCHITECTURE.md                        ARCHITECTURE.md
+```
+
+For cross-stack work:
+
+```text
+root AGENTS.md
+    -> read the docs/frontend/ set AND the docs/backend/ set
+    -> inspect the API contract (backend/API.md)
+    -> inspect the frontend consumers (web/src/services)
+    -> implement a coordinated change
+```
+
+---
+
+## 03 Never mix the document types
+
+`docs/frontend/DESIGN_SYSTEM.md` is a **visual** system: colors, typography,
+spacing, components, layout, breakpoints, responsive behavior, accessibility.
+
+`docs/backend/DESIGN_SYSTEM.md` is an **API** contract: vocabulary, canonical
+identifiers, response shapes, validation codes, business-state semantics,
+timetable session semantics, public schedule semantics, API conventions.
+
+These are different documents. Do not merge them, and do not replace one with
+the other.
+
+The same separation applies to `PRD.md` (frontend = UX, screens, workflows;
+backend = domain rules, API behavior, governance) and `ARCHITECTURE.md`
+(frontend = React app structure; backend = Express, controllers, services,
+models, solver, database).
+
+---
+
+## 04 Ownership boundaries
+
+- Do not change the other owner's domain unnecessarily.
+- A backend change that alters an API contract must state the required frontend
+  follow-up. It must not be silently applied to `web/`.
+- A frontend change must not become a second authoritative business-rule engine.
+  The backend is authoritative for course applicability, faculty eligibility,
+  allocation policy, Academic Context ownership, timetable/version consistency,
+  approval state, publication state, and solver constraints.
+- Do not move, merge, or rewrite the other owner's documents.
+
+---
+
+## 05 Inspect before you modify
+
+For every task:
+
+1. Read the owner-specific `AGENTS.md` for the task's domain.
+2. Read the real source files you are about to change.
+3. Read the real tests that cover them.
+4. Check `git status` and any existing modifications.
+
+Never claim a file or test was inspected unless it actually was.
+
+## 06 Repository-wide stack constraint
+
+**JavaScript only.** Use the existing stacks: React + Webpack (`web/`), and
+Node.js + Express.js + CommonJS + MongoDB + Mongoose (`backend/`).
+
+Do not introduce TypeScript, `.ts`, `.tsx`, Vite, Angular, a second backend
+framework, or a replacement ODM.
+
+> Note: an earlier template version of this file stated "TypeScript strict".
+> That was unfilled placeholder text and contradicts the JavaScript-only rule
+> defined in `docs/backend/AGENTS.md`. The JavaScript-only rule is correct.
+
+---
+
+## 07 General rules
+
+- Follow the owner's design system. If a value is not in that owner's
+  `DESIGN_SYSTEM.md`, ask. Do not invent it.
+- Keep responsibilities where that owner's `ARCHITECTURE.md` puts them.
+- Reuse before creating. Search for an existing helper or component first.
 - Small, focused changes. One task, one branch, one clear diff.
-- Do not add dependencies, tables, environment variables, or third-party services without asking.
+- Do not add dependencies, tables, environment variables, or third-party
+  services without asking.
 - Do not delete or rewrite working code the task does not require.
-- Never "improve" anything listed under intentional decisions in ARCHITECTURE.md.
+- Never "improve" anything listed under intentional decisions in the owning
+  domain's `ARCHITECTURE.md`.
 - Leave the project runnable after every change.
-
-## 04 Code guidelines
-
-- TypeScript strict. No `any`. No `@ts-ignore` without a comment saying why.
-- Functional components, hooks, named exports.
-- Validate every external input (forms, routes, webhooks) with a schema before it reaches a service.
-- Name things by what they do: `sendInvoiceEmail`, not `handleEmail2`.
+- Validate every external input before it reaches a service.
 - Comments explain why, not what. Delete commented-out code.
-- Every data-driven view handles loading, empty, and error states.
-- UI copy follows the tone rules in DESIGN_SYSTEM.md: plain, short, no exclamation marks.
-- Tests cover business logic in services. UI tests only for critical flows.
 - Formatting is the formatter's job. Run it. Do not argue with it.
 
-## 05 Security and best practices
+---
+
+## 08 Security
 
 - Secrets live in environment variables and are read on the server only.
   Never log them, never send them to the client.
 - Authorization is checked on every server entry point, not just in the UI.
-- Escape and validate everything that comes from a user, a webhook, or a third party.
+- Escape and validate everything that comes from a user, a webhook, or a
+  third party.
 - Rate limit public endpoints. Never trust a client-supplied user id or price.
-- No new auth flow, payment path, or data deletion behavior without explicit approval.
-- If docs/SECURITY.md exists in this project, it overrides this section.
+- No new auth flow, payment path, or data deletion behavior without explicit
+  approval.
+- If `SECURITY.md` exists in this project, it overrides this section.
 
-## 06 Useful commands
+---
 
+## 09 Useful commands
+
+```bash
+npm install                 install dependencies
+npm run dev                 start the dev server
+npm run build               production build (must pass before a PR)
+npm run lint                lint and syntax check
+
+npm test                    full test chain
+npm run test:timetable      authoritative timetable logic
+npm run test:rbac           TC RBAC enforcement
+npm run test:context        version/context anchor integrity
+npm run test:generation     TC timetable generation
+npm run test:review         TC review and submission
+npm run test:approval       HOD approval, rejection, publication
 ```
-npm install          install dependencies
-npm run dev          start the dev server
-npm run build        production build (must pass before a PR)
-npm run lint         lint and type check
-npm run test         unit tests
-npm run test:e2e     end-to-end tests
-```
 
-Replace these with this project's real commands. If a command fails, report the
-exact output. Do not work around it silently.
+If a command fails, report the exact output. Do not work around it silently.
 
-## 07 Definition of done
+---
 
-A task is done when all of these are true:
+## 10 Definition of done
+
 - The change does what the task asked, and nothing else.
-- Build, lint, and tests pass locally.
-- New UI matches DESIGN_SYSTEM.md and works at 375px wide.
-- Docs are updated if a structure, a decision, or a component changed.
-- The summary says what changed, what was not done, and what the user should check.
+- Build, lint, and relevant tests pass locally.
+- New UI matches `docs/frontend/DESIGN_SYSTEM.md` and works at 375px wide.
+- Docs are updated if a structure, decision, or component changed.
+- The summary says what changed, what was not done, and what the owner should
+  check.
 
-## 08 When to stop and ask
+---
+
+## 11 When to stop and ask
 
 Stop and ask instead of guessing when:
-- The task conflicts with the PRD, the design system, or an architectural boundary.
+
+- The task conflicts with the owning domain's PRD, design system, or an
+  architectural boundary.
 - Two reasonable readings of the task lead to different work.
 - The change needs a new dependency, table, secret, or service.
 - Something is broken that the task did not mention.
