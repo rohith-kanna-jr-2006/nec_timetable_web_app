@@ -17,6 +17,18 @@ export default function FacultyBasicInfoForm({
     });
   };
 
+  const handleBasicInfoChange = (newInfo) => {
+    onChange({
+      ...formData,
+      facultyName: newInfo.facultyName,
+      designation: newInfo.designation,
+      department: newInfo.department,
+      email: newInfo.email,
+      phone: newInfo.phone,
+      dob: newInfo.dob,
+    });
+  };
+
   return (
     <Card
       title="1. Faculty Information"
@@ -42,6 +54,18 @@ export default function FacultyBasicInfoForm({
           helperText="Enter full academic name including prefixes (Dr. / Mr. / Ms.)"
         />
 
+        <Input
+          label="Date of Birth"
+          id="faculty-dob-input"
+          type="date"
+          value={formData.dob || ''}
+          onChange={(e) => handleChange('dob', e.target.value)}
+          error={errors.dob}
+          required
+          icon="📅"
+          helperText="Format: DD-MM-YYYY"
+        />
+
         <Select
           label="Designation"
           id="faculty-designation-select"
@@ -51,18 +75,6 @@ export default function FacultyBasicInfoForm({
           placeholder="Select academic designation..."
           error={errors.designation}
           required
-        />
-
-        <Input
-          label="Department"
-          id="faculty-department-input"
-          value={formData.department || DEFAULT_DEPARTMENT}
-          onChange={(e) => handleChange('department', e.target.value)}
-          error={errors.department}
-          required
-          readOnly
-          style={{ backgroundColor: 'var(--color-surface-container-low)', cursor: 'not-allowed' }}
-          helperText="Default departmental scope for HOD workflow"
         />
 
         <Input

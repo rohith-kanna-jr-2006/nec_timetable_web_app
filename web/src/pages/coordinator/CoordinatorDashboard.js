@@ -90,7 +90,7 @@ export default function CoordinatorDashboard() {
               icon="⚡"
               onClick={() => navigate('/coordinator/optimization')}
             >
-              Solver Studio
+              Timetable Design
             </Button>
             <Button
               variant="primary"
@@ -302,7 +302,7 @@ export default function CoordinatorDashboard() {
               }}
             >
               <span style={{ fontSize: '1.5rem' }}>⚡</span>
-              <span style={{ fontSize: '0.8125rem', fontWeight: 600 }}>Solver Studio</span>
+              <span style={{ fontSize: '0.8125rem', fontWeight: 600 }}>Timetable Design</span>
             </button>
           </div>
         </Card>
