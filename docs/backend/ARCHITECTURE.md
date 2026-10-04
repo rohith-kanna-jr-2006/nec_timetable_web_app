@@ -369,6 +369,35 @@ The UI should use these states to select the appropriate next action.
 
 ---
 
+## 10a. Absence and substitute mapping (Phase 7)
+
+The substitute workflow is backend-authoritative end to end:
+
+```text
+FacultyAbsence
+      |
+      v
+resolve exact TimetableSession  (substituteMappingService)
+      |
+      v
+eligible substitute faculty for that exact slot
+      |
+      v
+SubstituteAllocation (persisted)
+```
+
+**Deterministic session resolution.** `resolveAffectedSessions` derives the timetable weekday from the absence date in UTC, then matches `TimetableSession` on `day` + `period` + faculty, where faculty is matched either as the session `facultyId` or anywhere inside `facultyAssignments`. Resolution is always scoped to an `academicContextId` and, when supplied, a `timetableVersionId`. It never selects a first match, a first class, or a default faculty. When more than one session matches, the service reports `AMBIGUOUS_AFFECTED_SESSION` / `ambiguity = MULTIPLE_MATCHING_SESSIONS` rather than guessing.
+
+**Eligibility is computed server-side.** `findEligibleSubstitutes` returns only faculty that pass every constraint for that one slot: active record, not the original faculty, not absent on the date, no other session at that day/period, not `UNAVAILABLE`/`PREFERRED_OFF`, and no conflicting `PENDING`/`ACCEPTED` mapping. The faculty master is never handed to the client for client-side filtering.
+
+**Authority split.** TC holds operational substitute-mapping authority. HOD retains administrative authority and ADMIN retains override authority. FACULTY can neither create nor confirm a mapping. This grant is deliberately narrow: it does not give TC HOD faculty-allocation authority.
+
+**Immutability.** Substitute data is stored only on `SubstituteAllocation`. `TimetableSession` is never mutated to carry substitute state, so `academicContextId`, `timetableVersionId`, `courseCode`, `sessionType`, `day`, `period`, `room` and `facultyAssignments` keep their meaning and historical workload is unaffected.
+
+**Context and version anchoring.** `FacultyAbsence.academicContextId` and `SubstituteAllocation.academicContextId` / `.timetableVersionId` / `.day` are optional additions so that pre-Phase-7 records remain valid without a migration. Every mapping written by the service persists them, which is what makes cross-context and cross-version mapping detectable.
+
+---
+
 ## 11. Version governance
 
 The normal workflow is:

@@ -521,9 +521,13 @@ async function runCoordinatorTimetableFlowTests() {
     // TEST 18: Coordinator substitute assignment is authorized
     // ------------------------------------------------------------
     console.log('\n--- TEST 18: Coordinator Substitute Assignment RBAC ---');
+    // Phase 7: substitute mapping is validated against the exact affected
+    // TimetableSession, so the absence date must resolve to the same weekday as
+    // the session created in TEST 8 (SAT). '2026-10-24' is a Saturday; the
+    // previous '2026-10-20' was a Tuesday and therefore affected no session.
     const testAbsence = await FacultyAbsence.create({
       facultyId: 'FWL-04',
-      date: '2026-10-20',
+      date: '2026-10-24',
       reason: 'Special Duty',
       status: 'APPROVED',
     });
@@ -537,7 +541,7 @@ async function runCoordinatorTimetableFlowTests() {
         originalFacultyId: 'FWL-04',
         substituteFacultyId: 'FWL-07',
         timetableSessionId: createdSessionId,
-        date: '2026-10-20',
+        date: '2026-10-24',
         period: 'P1',
       },
     });

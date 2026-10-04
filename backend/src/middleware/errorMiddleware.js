@@ -40,7 +40,11 @@ function errorHandler(err, req, res, next) {
   const message = err.message || 'Internal Server Error';
   const code = err.code && typeof err.code === 'string' ? err.code : 'INTERNAL_SERVER_ERROR';
 
-  const details = process.env.NODE_ENV === 'development' ? err.stack : undefined;
+  // Structured error details (e.g. the Phase 7 substitute rejection reasons) must
+  // reach the client. Previously this slot was overwritten with a stack trace, so
+  // every domain error lost its actionable payload. In development the stack is
+  // still surfaced, but no longer at the cost of the structured details.
+  const details = err.details || (process.env.NODE_ENV === 'development' ? err.stack : undefined);
 
   return errorResponse(res, message, statusCode, code, details);
 }

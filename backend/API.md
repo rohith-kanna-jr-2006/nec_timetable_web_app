@@ -123,7 +123,7 @@ Retrieve active user session profile during page refresh or session restoration.
 
 ### Role-Based Access Control (RBAC) Matrix
 
-| Domain Operation | Method & Endpoint | FACULTY | AC | HOD | ADMIN |
+| Domain Operation | Method & Endpoint | FACULTY | TC (legacy AC) | HOD | ADMIN |
 | :--- | :--- | :---: | :---: | :---: | :---: |
 | **Authentication** | `POST /api/auth/login`, `GET /api/auth/me` | Allowed | Allowed | Allowed | Allowed |
 | **View Own Timetable** | `GET /api/timetable/faculty/:id` | Allowed | Allowed | Allowed | Allowed |
@@ -131,7 +131,10 @@ Retrieve active user session profile during page refresh or session restoration.
 | **View Workload** | `GET /api/workload`, `/summary` | Allowed | Allowed | Allowed | Allowed |
 | **Submit Absence** | `POST /api/absences` | Allowed | Allowed | Allowed | Allowed |
 | **Approve/Reject Absence** | `PATCH /api/absences/:id/status` | **403** | **403** | Allowed | Allowed |
-| **Assign Substitute** | `POST /api/substitutes` | **403** | **403** | Allowed | Allowed |
+| **Assign Substitute** | `POST /api/substitutes` | **403** | Allowed | Allowed | Allowed |
+| **Resolve Affected Session** | `GET /api/substitutes/affected-sessions` | **403** | Allowed | Allowed | Allowed |
+| **Eligible Substitute Faculty** | `GET /api/substitutes/eligible-faculty` | **403** | Allowed | Allowed | Allowed |
+| **Update Substitute Status** | `PATCH /api/substitutes/:id/status` | **403** | Allowed | Allowed | Allowed |
 | **Course Candidate Handlers**| `POST/PUT/DELETE /api/course-faculty-handlers` | **403** | Allowed | Allowed | Allowed |
 | **Create Timetable Version** | `POST /api/timetable/version` | **403** | Allowed | Allowed | Allowed |
 | **Approve / Publish Timetable**| `PATCH /api/timetable/version/:id/status` | **403** | **403** | Allowed | Allowed |
@@ -926,3 +929,69 @@ HOD approval/rejection of leave.
 
 ### `GET /api/substitutes` & `POST /api/substitutes`
 Assign substitute faculty to a scheduled timetable session without altering historical workload.
+
+**Authorization:** `HOD`, `TC`, `ADMIN` (and legacy `AC` during migration). `FACULTY` receives `403`. This grant is scoped to substitute mapping and confers no HOD faculty-allocation authority on TC.
+
+Phase 7 makes `POST /api/substitutes` fully server-validated. The backend resolves the affected session and evaluates eligibility itself; the request body is never trusted on its own.
+
+Request fields:
+
+| Field | Required | Notes |
+| --- | --- | --- |
+| `absenceId` | Yes | Authoritative source of `facultyId` and `date`. |
+| `substituteFacultyId` | Yes | Must exist and be active. |
+| `period` | Yes | Slot period, e.g. `P1`. |
+| `timetableSessionId` | No | When supplied it must be one of the deterministically resolved affected sessions. |
+| `academicContextId` | No | When the absence carries one, the request must match it. |
+| `timetableVersionId` | No | Pins resolution to an exact version. |
+| `date`, `originalFacultyId`, `status` | No | Accepted for backward compatibility and cross-checked; the absence record wins. |
+
+On success the response `meta.resolvedSession` carries the exact affected session.
+
+Structured errors (`error.details` always populated):
+
+| Code | HTTP | Meaning |
+| --- | --- | --- |
+| `ABSENCE_NOT_FOUND` | 404 | Unknown `absenceId`. |
+| `ABSENCE_NOT_APPROVED` | 409 | Absence status is `REJECTED`. |
+| `DATE_ABSENCE_MISMATCH` | 409 | Body `date` contradicts the absence date. |
+| `INVALID_ABSENCE_DATE` | 400 | Malformed date, or a Sunday / non Mon-Sat working day. |
+| `ABSENCE_CONTEXT_MISMATCH` | 409 | Absence context differs from the requested context. |
+| `SESSION_NOT_FOUND` | 404 | Unknown `timetableSessionId`. |
+| `SESSION_NOT_AFFECTED_BY_ABSENCE` | 409 | The named session is not one the absence affects. |
+| `SESSION_CONTEXT_MISMATCH` | 409 | Named session belongs to another context. |
+| `SESSION_VERSION_MISMATCH` | 409 | Named session belongs to another timetable version. |
+| `NO_AFFECTED_SESSION` | 404 | No session matches faculty + date + period. |
+| `AMBIGUOUS_AFFECTED_SESSION` | 409 | More than one session matches; resolve the exact one first. |
+| `SUBSTITUTE_FACULTY_NOT_FOUND` | 404 | Unknown substitute. |
+| `SUBSTITUTE_FACULTY_INACTIVE` | 409 | Substitute is inactive. |
+| `SUBSTITUTE_IS_ORIGINAL_FACULTY` | 409 | Substitute is the absent faculty. |
+| `SUBSTITUTE_NOT_ELIGIBLE` | 409 | `details.reasons` lists why. |
+| `DUPLICATE_SUBSTITUTE_MAPPING` | 409 | Identical active mapping already exists. |
+
+`SUBSTITUTE_NOT_ELIGIBLE` reasons: `CONFLICTING_TIMETABLE_SESSION`, `ABSENT_ON_DATE`, `MARKED_UNAVAILABLE`, `PREFERRED_OFF`, `CONFLICTING_SUBSTITUTE_MAPPING`, `IS_ORIGINAL_FACULTY`.
+
+### `GET /api/substitutes/affected-sessions`
+Resolve the exact `TimetableSession(s)` an absence affects. Authorization: `HOD`, `TC`, `ADMIN` (+ legacy `AC`).
+
+Query: `absenceId` (or `facultyId` + `date` + `period`), plus optional `academicContextId` / `timetableVersionId`.
+
+Resolution is deterministic: the date is converted to its weekday in UTC and matched against `TimetableSession` on `day` + `period` + faculty (as `facultyId` or inside `facultyAssignments`), always scoped to the supplied context/version. It never falls back to a first match or a default faculty.
+
+Response `data`: `date`, `day`, `period`, `facultyId`, `sessionCount`, `ambiguity` (`MULTIPLE_MATCHING_SESSIONS` or `null`), and `sessions[]` each carrying `timetableSessionId`, `academicContextId`, `timetableVersionId`, `absenceId`, `originalFacultyId`, `originalFacultyName`, `date`, `day`, `period`, `courseCode`, `courseName`, `section`, `year`, `academicYear`, `semester`, `room`, `sessionType`, `duration`, `facultyAssignments`, `facultyCount`.
+
+A zero-match result is a normal `200` with `sessionCount: 0`, not an error.
+
+### `GET /api/substitutes/eligible-faculty`
+Server-side eligibility for one exact slot. Authorization: `HOD`, `TC`, `ADMIN` (+ legacy `AC`).
+
+Query: `timetableSessionId` (required), plus optional `absenceId`, `academicContextId`, `timetableVersionId`.
+
+Returns only faculty satisfying **all** of: active faculty record, not the original faculty, not absent on the date, no other `TimetableSession` at that day/period, not `UNAVAILABLE`/`PREFERRED_OFF` in `FacultyAvailability`, and no conflicting `PENDING`/`ACCEPTED` substitute mapping for the slot. The full faculty master is never returned for client-side filtering.
+
+Response `data`: `timetableSessionId`, `absenceId`, `date`, `day`, `period`, `eligibleCount`, `eligibleFaculty[]` (`facultyId`, `facultyName`, `department`, `designation`).
+
+Errors: `SESSION_REQUIRED` (400), `SESSION_NOT_FOUND` (404), `ABSENCE_NOT_FOUND` (404), `DATE_REQUIRED` (400), `SESSION_CONTEXT_MISMATCH` (409).
+
+### `PATCH /api/substitutes/:id/status`
+Accept / reject / cancel a mapping. Authorization: `HOD`, `TC`, `ADMIN` (+ legacy `AC`). `FACULTY` receives `403`.
