@@ -437,6 +437,86 @@ Invariants:
 
 ---
 
+## 10d. Faculty master and DOB-derived credentials (Phase 9)
+
+Faculty Master identity, teaching allocation and institutional responsibility are three separate concerns:
+
+```text
+Faculty Master   -> Faculty document (identity; never holds a credential)
+Teaching         -> FacultyWorkload document
+Responsibility   -> FacultyWorkload.responsibilities
+Login account    -> User document (holds only a bcrypt hash)
+```
+
+`Faculty` and `User` are **separate records linked by `facultyId`**, not by email. Login accounts use role-based addresses (`hod@...`), so email is not a reliable join key.
+
+### Date of birth
+
+`Faculty.dateOfBirth` is date-only domain data. It is stored at **UTC midnight** and read back through UTC getters, so the calendar day cannot drift with the server timezone. It is optional: legacy records simply have no DOB and none is ever invented.
+
+Accepted input is a real calendar date (`YYYY-MM-DD` or a `Date`). Malformed values, impossible dates such as `2003-02-31`, and future dates are rejected rather than silently coerced.
+
+### Credential flow
+
+When a `dateOfBirth` is supplied at creation, the backend derives the initial credential as `DDMMYYYY`, hashes it with the project's existing `bcryptjs` mechanism, and stores **only the hash** on a linked `User`:
+
+```text
+dateOfBirth -> DDMMYYYY -> bcrypt hash -> User.passwordHash
+```
+
+The plaintext value exists only transiently in memory. It is never persisted, logged, or returned by any endpoint. When no `dateOfBirth` is supplied no account is created, which preserves the pre-Phase-9 creation workflow exactly.
+
+Editing faculty information never writes a credential, so an existing `passwordHash` is always preserved and a DOB change never resets a password.
+
+### Faculty edit whitelist
+
+`PUT /api/faculty/:facultyId` accepts **only** `facultyName`, `email`, `dateOfBirth`, `designation`, `phone`. Every other field is rejected with `PROTECTED_FIELD` (400) rather than silently dropped, so an attempted privilege escalation is visible to the caller. The previous implementation passed the raw request body into `findOneAndUpdate`, which allowed `role`, `department`, `facultyId`, `isActive` and arbitrary fields to be mass-assigned.
+
+Editing `email` does **not** rewrite the login account: a PII edit must not silently change credential identity or break an existing login.
+
+## 10e. Elective Object (EO) selection (Phase 10)
+
+The EO decision is **HOD-authoritative** and **AcademicContext-scoped**:
+
+```text
+Course catalog (EO)  -> candidate (regulation + slot eligible)
+       ^
+       | HOD selects (POST /api/hod-allocations)
+       v
+HODFacultyAllocation (per academicContextId)  -> ACTIVE elective
+       ^
+       | TC reads only
+       v
+TC design context -> timetable generation
+```
+
+The backend distinguishes five states that must not be conflated:
+
+| State | Meaning |
+| --- | --- |
+| Elective catalog | An EO course exists in `Course` (`category`/`electiveType` = PEC/OEC/Management Elective). |
+| Elective candidate | That course is applicable to the context's regulation **and** its semester's slot types. |
+| HOD selection | An `HODFacultyAllocation` exists for that exact `academicContextId`. |
+| Active elective | A selection that exists and is not `REJECTED`. |
+| Timetable eligibility | Active electives surfaced in the TC design context for generation. |
+
+A catalog entry is never automatically active. Only an HOD allocation activates an elective. Context A's selection never becomes active in Context B.
+
+### Regulation handling
+
+Regulation is a **data-derived** concept, not a hardcoded constant:
+
+- `Course.regulation` carries the regulation (`R22`, `R22-PG`).
+- The regulation applying to a context is derived from the `AcademicContext.programme`.
+- `getSupportedRegulations()` reports only regulations the `Course` collection genuinely holds. **R17 / R26 are never fabricated**, even though the frontend may wish for them.
+- `contextStatusService.regulation` is derived rather than hardcoded to `R22`.
+
+A candidate must belong to the cohort's regulation; otherwise the selection is refused with `ELECTIVE_COURSE_WRONG_REGULATION`. Slot-type eligibility (PEC / OEC / Management Elective per `R22_ELECTIVE_SLOT_MAP`) was already enforced by `createAllocation` and remains unchanged.
+
+### Note on `Course.academicYear`
+
+`Course.academicYear` / `curriculumYear` (`"2024-25 onwards"`) express **R22 curriculum applicability** and are unrelated to `AcademicContext.academicYearFrom`/`academicYearTo`, which express an **academic-year range** (Phase 8). These are different concepts and are deliberately not migrated into each other.
+
 ## 11. Version governance
 
 The normal workflow is:

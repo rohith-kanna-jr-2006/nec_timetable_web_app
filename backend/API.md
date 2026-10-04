@@ -953,6 +953,56 @@ Structured errors:
 | `FACULTY_INACTIVE` | 409 | Faculty is inactive. |
 | `DUPLICATE_CLASS_ADVISOR` | 409 | A concurrent write produced a second active advisor. |
 
+### `POST /api/faculty` & `PUT /api/faculty/:facultyId` (Phase 9)
+
+**Creation.** `POST /api/faculty` additionally accepts `dateOfBirth`. When it is supplied, the backend derives the initial credential as `DDMMYYYY`, hashes it with `bcryptjs`, and stores **only the hash** on a linked `User` account (linked by `facultyId`). The plaintext credential is never persisted, logged, or returned. When `dateOfBirth` is omitted no account is created, preserving the previous workflow.
+
+`dateOfBirth` must be a real calendar date. Malformed values, impossible dates, and future dates are rejected. It is optional for legacy compatibility; no DOB is ever invented for an existing record.
+
+**Update whitelist.** `PUT /api/faculty/:facultyId` accepts **only**:
+
+`facultyName`, `email`, `dateOfBirth`, `designation`, `phone`
+
+Every other field is rejected with `PROTECTED_FIELD` (400), including `facultyId`, `role`, `roles`, `department`, `password`, `passwordHash`, `isActive`, `_id`, `createdAt`, `updatedAt`, workload totals, teaching allocations and responsibilities.
+
+| Code | HTTP | Meaning |
+| --- | --- | --- |
+| `PROTECTED_FIELD` | 400 | Body contained a protected or unknown field. `details.attempted` lists them, `details.allowed` lists the permitted fields. |
+| `NO_UPDATABLE_FIELDS` | 400 | Body contained no permitted field. |
+| `INVALID_DATE_OF_BIRTH` | 400 | `dateOfBirth` is not a real calendar date. |
+| `DUPLICATE_EMAIL` | 409 | Another faculty already uses that email. |
+
+This endpoint never writes a credential: an existing `User.passwordHash` is always preserved, and changing `dateOfBirth` does not reset a password. Changing `email` does not modify the linked login account.
+
+### EO selection (Phase 10)
+
+EO selection is **HOD-authoritative** and scoped to an exact `academicContextId`. No new write endpoint was added: selection continues to happen through the existing `POST /api/hod-allocations`, which Phase 10 extends with regulation validation.
+
+**`GET /api/hod-allocations/elective-candidates`** (authenticated, read-only)
+
+Query: `academicContextId` (required), `regulation?`, `semester?`.
+
+Returns the EO catalog entries applicable to that cohort: `academicContextId`, `regulation`, `semester`, `slots`, `allowedElectiveTypes`, `candidateCount`, and `candidates[]` (`courseCode`, `courseName`, `regulation`, `catalogSemester`, `electiveType`, `vertical`, `isSlotEligible`, `isSelected`).
+
+**`GET /api/hod-allocations/elective-selection`** (authenticated, read-only)
+
+Query: `academicContextId` (required).
+
+Returns the HOD-authoritative active selection: `regulation`, `semester`, `requiredSlotsCount`, `slots`, `selectedCount`, `isComplete`, `state`, and `selected[]` (`courseCode`, `courseName`, `allocationId`, `status`, `assignedBy`, `facultyId`, timestamps). `state` is `ELECTIVE_SELECTION_COMPLETE` or `ELECTIVE_SELECTION_REQUIRED`.
+
+| Code | HTTP | Meaning |
+| --- | --- | --- |
+| `ACADEMIC_CONTEXT_REQUIRED` | 400 | `academicContextId` missing. |
+| `CONTEXT_NOT_FOUND` | 404 | Unknown academic context. |
+| `REGULATION_NOT_SUPPORTED` | 404 | Regulation is not represented in the course catalog. R17/R26 are never fabricated. |
+| `COURSE_NOT_FOUND` | 404 | Unknown course. |
+| `COURSE_NOT_ELECTIVE` | 409 | Course is not an EO course. |
+| `COURSE_INACTIVE` | 409 | Course is inactive. |
+| `ELECTIVE_COURSE_WRONG_REGULATION` | 409 | Course belongs to another regulation than the cohort. |
+| `ELECTIVE_COURSE_WRONG_SEMESTER` | 409 | Elective type is not permitted by the cohort's slots. |
+
+`POST /api/hod-allocations` now also returns `ELECTIVE_COURSE_WRONG_REGULATION` when an EO course from another regulation is selected for a cohort. Existing slot-type and duplicate checks (`COURSE_SEMESTER_MISMATCH`, `HOD_ALLOCATION_CONFLICT`) are unchanged.
+
 ### Academic year range (Phase 8)
 
 `AcademicContext` exposes the canonical pair `academicYearFrom` / `academicYearTo` (integers, e.g. `2026` / `2027`). The legacy `academicYear` string (`'2026-27'`) is retained as a **derived compatibility mirror** and is never the source of truth.
