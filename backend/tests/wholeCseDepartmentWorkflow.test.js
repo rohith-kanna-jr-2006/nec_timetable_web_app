@@ -25,6 +25,13 @@ const TimetableVersion = require('../src/models/TimetableVersion');
 const TimetableSession = require('../src/models/TimetableSession');
 const { resolveSemesterForContext } = require('../src/services/timetable/semesterResolver');
 const { seedTimetable } = require('../src/seeds/seedTimetable');
+// Phase 12: this suite wipes allocations/versions/sessions for shared cohorts
+// (II-B, II-C). Snapshot them first and restore them verbatim so the canonical
+// dataset is unchanged for every later suite.
+const { snapshotSharedContext, restoreSharedContext } = require('./helpers/testIsolation');
+
+// Phase 12: canonical state captured before this suite mutates shared cohorts.
+let sharedSnapshot = null;
 
 let passCount = 0;
 let failCount = 0;
@@ -156,6 +163,12 @@ async function runWholeCseTestSuite() {
     // Pick an unseeded cohort (e.g. II Year Sec C)
     const ctxII_C = allContexts.find((c) => c.year === 'II Year' && c.section === 'C');
     assert(!!ctxII_C, 'Found II Year Section C context');
+
+    // Phase 12: protect the canonical II-B / II-C state before this suite wipes it.
+    {
+      const sharedCohorts = allContexts.filter((c) => c.year === 'II Year' && ['B', 'C'].includes(c.section));
+      sharedSnapshot = await snapshotSharedContext(sharedCohorts.map((c) => c._id));
+    }
 
     // Remove any previous versions/allocations for II Year Sec C to test pristine state
     await TimetableVersion.deleteMany({
@@ -408,6 +421,13 @@ async function runWholeCseTestSuite() {
     console.error('Unhandled test suite error:', err);
     process.exitCode = 1;
   } finally {
+    // Phase 12: restore the canonical II-B / II-C rows captured at the start so
+    // this suite leaves no trace in shared seed data.
+    try {
+      if (sharedSnapshot) await restoreSharedContext(sharedSnapshot);
+    } catch (e) {
+      console.error('Phase 12 shared-state restore failed:', e && e.message ? e.message : e);
+    }
     await disconnectDB();
   }
 }

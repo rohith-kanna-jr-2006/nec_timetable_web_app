@@ -27,9 +27,16 @@ async function seedHandlers() {
     },
   ];
 
-  await CourseFacultyHandler.deleteMany({});
+  // Phase 12: reset only the handler sets this seed manages, never the whole
+  // collection. This seed owns every CourseFacultyHandler row it defines, so
+  // scoping by its own course codes preserves the refresh semantics while
+  // leaving anything another flow created untouched.
+  const managedCourses = handlers.map((h) => h.courseCode);
+  const removed = await CourseFacultyHandler.deleteMany({ courseCode: { $in: managedCourses } });
   const inserted = await CourseFacultyHandler.insertMany(handlers);
-  console.log(`[Seed] Successfully seeded ${inserted.length} candidate handler sets.`);
+  console.log(
+    `[Seed] Refreshed ${inserted.length} candidate handler sets (removed ${removed.count} stale copies).`
+  );
   return inserted;
 }
 

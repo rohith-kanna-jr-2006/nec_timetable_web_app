@@ -974,6 +974,25 @@ Every other field is rejected with `PROTECTED_FIELD` (400), including `facultyId
 
 This endpoint never writes a credential: an existing `User.passwordHash` is always preserved, and changing `dateOfBirth` does not reset a password. Changing `email` does not modify the linked login account.
 
+### Workload integrity (Phase 11)
+
+A course's weekly period requirement is authoritative in `Course.totalPeriod`, falling back to `Course.L + T + P`. When neither exists the requirement is reported as **missing** rather than defaulted.
+
+The TC design context now exposes `requiredPeriodsSource` (`TOTAL_PERIOD` | `LTP_SUM` | `LEGACY_FALLBACK`) and `requiredPeriodsAuthoritative` per course, so a curriculum gap is visible to the client.
+
+Session-count rules:
+
+- One `period` = one timetable slot.
+- A multi-faculty LAB or MC_SAS is **one class event per slot**; the class-session count is never multiplied by the number of assigned faculty.
+
+Workload figures are backend-authoritative. Supplying `calculatedTeachingHours`, `calculatedResponsibilityHours`, `calculatedTotalHours`, `teaching` or `responsibilities` from a client is rejected:
+
+| Code | HTTP | Meaning |
+| --- | --- | --- |
+| `WORKLOAD_FIELD_PROTECTED` | 400 | A backend-authoritative workload field was supplied by the client. `details.attempted` lists them. |
+
+`sourceTotalHours` remains accepted as reference data. The repository defines no workload multiplier distinguishing `PRIMARY` / `ADDITIONAL` / `OPTIONAL`, nor `MATHS_BME` / `ENGLISH` within `MC_SAS`; none is invented.
+
 ### EO selection (Phase 10)
 
 EO selection is **HOD-authoritative** and scoped to an exact `academicContextId`. No new write endpoint was added: selection continues to happen through the existing `POST /api/hod-allocations`, which Phase 10 extends with regulation validation.

@@ -562,6 +562,52 @@ Workload is **HOD-allocation driven**, not session driven: a workload record ref
 
 **Ambiguity reported, not guessed:** the repository defines no multiplier distinguishing `PRIMARY` / `ADDITIONAL` / `OPTIONAL` within a multi-faculty LAB, nor between `MATHS_BME` and `ENGLISH` within `MC_SAS`. No such multiplier was invented. Each faculty assignment is stored on the session and counted once in that faculty's own projection; the class event count remains one per slot.
 
+## 10g. Seed integrity and test isolation (Phase 12)
+
+### Canonical seed vs demo/test fixture
+
+```text
+Canonical master seed          Demo / test fixture
+-----------------------------  ---------------------------------
+regulation + courses           temporary timetable versions
+faculty                        temporary sessions
+AcademicContexts               temporary HOD allocations
+baseline HOD allocations       temporary users / workload rows
+```
+
+`npm run seed` remains the canonical entry point and keeps its refresh semantics, but it no longer erases whole collections. Every seed resets only the rows it owns:
+
+| Seed | Previous | Now |
+| --- | --- | --- |
+| `seedUsers` | `User.deleteMany({})` | deletes only the emails it defines |
+| `seedWorkload` | `FacultyWorkload.deleteMany({})` | deletes only its master faculty ids |
+| `seedHandlers` | `CourseFacultyHandler.deleteMany({})` | deletes only its own course codes |
+| `seedAcademicContext` | already upsert-scoped | unchanged |
+| `seedTimetable` | already scoped to its own version + 2 documented legacy codes | unchanged |
+
+A global `deleteMany({})` during seeding was itself a contamination source: it destroyed unrelated accounts and workload rows belonging to other suites. `seedTimetable` never resets timetable history — it replaces sessions only for the exact version it owns.
+
+### Suites that mutate shared cohorts
+
+`tests/helpers/testIsolation.js` provides `snapshotSharedContext()` / `restoreSharedContext()`. A suite that needs controlled state for a canonical cohort snapshots its allocations, versions and sessions first, then restores them **verbatim with their original `_id`** during cleanup.
+
+Two suites required this:
+
+- `timetableSolver.test.js` wiped every III-A allocation and replaced them with a hardcoded list, never restoring the originals.
+- `wholeCseDepartmentWorkflow.test.js` wiped II-B / II-C versions, sessions and allocations.
+
+### Known leak fixed in `backend.test.js`
+
+Test 17 created an **empty** timetable version and then submitted it. The Phase 5 submission guard correctly refuses a version with zero sessions, so the suite threw a fatal error **before its cleanup ran**, leaking one allocation + one version per failed run — the source of the duplicate `22CSC14` allocations that broke `coordinatorTimetableFlow`. The fixture now seeds a session, so the lifecycle transition succeeds and cleanup completes.
+
+### Fixture ownership
+
+Fixtures are namespaced (`P12…`, `P10…`, `P11…`, `P8…`, `P9…`, `P7…`) and removed by exact id or unique prefix. **No cleanup targets shared data by broad real-world attributes** such as `section = A` or `department = CSE`. III-A remains a valid regression fixture but is never the deletion target for generic tests.
+
+### Test order independence
+
+`timetableSolver` → `tcTimetableGeneration` → `tcTimetableReviewSubmission` and the reverse order both produce identical results (67/0, 40/0, 118/0), and `npm test` passes with exit code 0.
+
 ## 11. Version governance
 
 The normal workflow is:

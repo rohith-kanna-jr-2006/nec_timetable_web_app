@@ -92,9 +92,16 @@ async function seedUsers() {
     }
   }
 
-  await User.deleteMany({});
+  // Phase 12: reset ONLY the accounts this seed manages, never the whole
+  // collection. A global deleteMany({}) previously destroyed unrelated accounts
+  // (including every test fixture user), which made the seed itself a source of
+  // cross-suite contamination.
+  const managedEmails = users.map((u) => u.email);
+  const removed = await User.deleteMany({ email: { $in: managedEmails } });
   const inserted = await User.insertMany(users);
-  console.log(`[Seed] Successfully seeded ${inserted.length} development user accounts.`);
+  console.log(
+    `[Seed] Refreshed ${inserted.length} managed development user accounts (removed ${removed.count} stale copies).`
+  );
   return inserted;
 }
 
