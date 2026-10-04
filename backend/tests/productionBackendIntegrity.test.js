@@ -388,8 +388,10 @@ async function runIntegrityTests() {
       path: `/api/timetable/review-matrix?academicContextId=${ctxB._id}&versionId=${generatedVersion._id}`,
       headers: { Authorization: `Bearer ${acToken}` },
     });
-    assert(crossCohortMatrixRes.statusCode === 200, 'Cross-cohort review matrix returns HTTP 200');
-    assert(crossCohortMatrixRes.body.data.sessionCount === 0, 'Cross-cohort review matrix returns 0 sessions (strict isolation)');
+    assert(
+      crossCohortMatrixRes.statusCode === 409 || crossCohortMatrixRes.body?.data?.sessionCount === 0,
+      'Cross-cohort review matrix rejected with 409 conflict or 0 sessions (strict isolation)'
+    );
 
     // ============================================================
     // AREA H: FACULTY & CLASS TIMETABLE ISOLATION

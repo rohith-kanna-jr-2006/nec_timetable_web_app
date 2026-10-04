@@ -30,7 +30,7 @@ export default function FacultyAvailabilityPage() {
   const [formReason, setFormReason] = useState('');
   const [formValidation, setFormValidation] = useState('');
 
-  const facultyId = user?.facultyId || 'FWL-03';
+  const facultyId = user?.facultyId || null;
   const periods = ['P1', 'P2', 'P3', 'P4', 'P5', 'P6', 'P7'];
 
   const loadAvailability = async () => {
@@ -49,7 +49,12 @@ export default function FacultyAvailabilityPage() {
   };
 
   useEffect(() => {
-    loadAvailability();
+    if (facultyId) {
+      loadAvailability();
+    } else {
+      setError('Faculty ID not available. Please log in again.');
+      setLoading(false);
+    }
   }, [facultyId]);
 
   const handleOpenAdd = (day = 'MON', period = 'P1') => {

@@ -37,6 +37,10 @@ const facultySchema = new mongoose.Schema(
       trim: true,
       default: null,
     },
+    dateOfBirth: {
+      type: Date,
+      default: null,
+    },
     roles: {
       type: [String],
       default: [],

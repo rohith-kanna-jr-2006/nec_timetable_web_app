@@ -239,6 +239,15 @@ function validateFacultyCreationPayload(req) {
     }
   }
 
+  if (body.dateOfBirth !== undefined && body.dateOfBirth !== null && body.dateOfBirth !== '') {
+    const dob = new Date(body.dateOfBirth);
+    if (isNaN(dob.getTime())) {
+      errors.push('dateOfBirth must be a valid date (YYYY-MM-DD)');
+    } else if (dob > new Date()) {
+      errors.push('dateOfBirth cannot be in the future');
+    }
+  }
+
   // 2. Teaching Validation (supports nested teaching or flat allocation properties)
   let teachingToValidate = body.teaching;
   if (teachingToValidate === undefined) {

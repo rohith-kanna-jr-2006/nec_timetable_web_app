@@ -18,6 +18,21 @@ const academicContextSchema = new mongoose.Schema(
       trim: true,
       uppercase: true,
     },
+    fromYear: {
+      type: String,
+      required: [true, 'From Year is required'],
+      trim: true,
+    },
+    toYear: {
+      type: String,
+      required: [true, 'To Year is required'],
+      trim: true,
+    },
+    regulation: {
+      type: String,
+      required: [true, 'Regulation is required'],
+      trim: true,
+    },
     year: {
       type: String,
       required: [true, 'Year is required'],

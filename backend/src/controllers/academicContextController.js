@@ -75,7 +75,7 @@ async function getContextById(req, res, next) {
  */
 async function createContext(req, res, next) {
   try {
-    const { academicYear, semester, department, year, section, program, status } = req.body;
+    const { academicYear, semester, department, year, section, program, status, fromYear, toYear, regulation } = req.body;
 
     const existing = await AcademicContext.findOne({
       academicYear: academicYear.trim(),
@@ -98,6 +98,9 @@ async function createContext(req, res, next) {
       academicYear: academicYear.trim(),
       semester: semester.trim(),
       department: department.toUpperCase().trim(),
+      fromYear: fromYear ? fromYear.trim() : academicYear.trim(),
+      toYear: toYear ? toYear.trim() : academicYear.trim(),
+      regulation: regulation ? regulation.trim() : 'R22',
       year: year.trim(),
       section: section.toUpperCase().trim(),
       program: program || 'UG',

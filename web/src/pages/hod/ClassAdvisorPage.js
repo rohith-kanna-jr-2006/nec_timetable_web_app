@@ -17,7 +17,7 @@ import ErrorState from '../../components/common/ErrorState';
 import Modal from '../../components/common/Modal';
 import Select from '../../components/common/Select';
 
-// Authoritative 12 target class cohorts for 2026-27 Odd Semester CSE
+// Authoritative target class cohorts (II–IV Year, Sections A–D)
 const TARGET_CLASSES = [
   { year: 'II Year', section: 'A' },
   { year: 'II Year', section: 'B' },
@@ -113,10 +113,14 @@ export default function ClassAdvisorPage() {
       );
 
       if (!ctx) {
+        // Get current academic context from existing data
+        const currentYear = contexts[0]?.academicYear || 'Current';
+        const currentSemester = contexts[0]?.semester || '';
+
         // Create context on the fly if missing in DB
         const createdCtx = await createAcademicContext({
-          academicYear: '2026-27',
-          semester: 'Odd Semester',
+          academicYear: currentYear,
+          semester: currentSemester,
           department: 'CSE',
           year: activeTargetCohort.year,
           section: activeTargetCohort.section,
@@ -203,7 +207,12 @@ export default function ClassAdvisorPage() {
               Academic Target Context
             </div>
             <div style={{ fontSize: '1.125rem', fontWeight: 800, color: 'var(--color-primary)', marginTop: '2px' }}>
-              Academic Year 2026-27 — Odd Semester — Department of Computer Science & Engineering
+              {(() => {
+                const yrs = [...new Set(contexts.map(c => c.academicYear).filter(Boolean))];
+                const sems = [...new Set(contexts.map(c => c.semester).filter(Boolean))];
+                if (yrs.length === 0) return 'Department of Computer Science & Engineering';
+                return `${yrs.join(', ')}${sems.length ? ' — ' + sems.join(', ') : ''} — Department of Computer Science & Engineering`;
+              })()}
             </div>
           </div>
           <div style={{ display: 'flex', gap: '8px' }}>
@@ -276,7 +285,11 @@ export default function ClassAdvisorPage() {
                         {target.year} — Section &apos;{target.section}&apos;
                       </td>
                       <td style={{ padding: '12px 16px' }}>
-                        2026-27 (Odd Semester)
+                        {(() => {
+                          const y = ctx?.academicYear || '—';
+                          const s = ctx?.semester || '—';
+                          return `${y} (${s})`;
+                        })()}
                       </td>
                       <td style={{ padding: '12px 16px' }}>
                         {isConflict ? (
@@ -365,7 +378,14 @@ export default function ClassAdvisorPage() {
                 Computer Science & Engineering — {activeTargetCohort.year} (Section {activeTargetCohort.section})
               </div>
               <div style={{ fontSize: '0.75rem', color: 'var(--color-on-surface-variant)', marginTop: '2px' }}>
-                Academic Year 2026-27 • Odd Semester
+                {(() => {
+                  const cohortCtx = contexts.find(
+                    (c) => c.year === activeTargetCohort.year && c.section === activeTargetCohort.section && c.department === 'CSE'
+                  );
+                  const y = cohortCtx?.academicYear || '—';
+                  const s = cohortCtx?.semester || '—';
+                  return `${y} • ${s}`;
+                })()}
               </div>
             </div>
 

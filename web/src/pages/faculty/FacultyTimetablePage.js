@@ -22,7 +22,7 @@ export default function FacultyTimetablePage() {
   const [scheduleMatrix, setScheduleMatrix] = useState({});
   const [sessionCount, setSessionCount] = useState(0);
 
-  const facultyId = user?.facultyId || user?.id || 'FAC01';
+  const facultyId = user?.facultyId || null;
   const facultyName = user?.name || user?.facultyName || 'Faculty Member';
 
   // Filter only regular academic periods (excluding standalone breaks)
@@ -61,7 +61,12 @@ export default function FacultyTimetablePage() {
   };
 
   useEffect(() => {
-    loadSchedule();
+    if (facultyId) {
+      loadSchedule();
+    } else {
+      setError('Faculty ID not available. Please log in again.');
+      setLoading(false);
+    }
   }, [facultyId]);
 
   return (

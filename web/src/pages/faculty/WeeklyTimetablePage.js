@@ -29,7 +29,7 @@ export default function WeeklyTimetablePage() {
   const [sessions, setSessions] = useState([]);
   const [selectedDayFilter, setSelectedDayFilter] = useState('ALL');
 
-  const [activeFacultyId, setActiveFacultyId] = useState(user?.facultyId || 'FWL-03');
+  const [activeFacultyId, setActiveFacultyId] = useState(user?.facultyId || null);
   const [activeFacultyName, setActiveFacultyName] = useState(user?.name || 'Dr. S. Karpusamy');
   const [allFaculty, setAllFaculty] = useState([]);
 
@@ -79,6 +79,11 @@ export default function WeeklyTimetablePage() {
   }, [selectedContextId]);
 
   const fetchMatrix = useCallback(async () => {
+    if (viewMode === 'FACULTY' && !activeFacultyId) {
+      setError('Faculty ID not available. Please log in again.');
+      setIsLoading(false);
+      return;
+    }
     setIsLoading(true);
     setError(null);
     try {

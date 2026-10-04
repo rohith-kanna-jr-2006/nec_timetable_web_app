@@ -5,6 +5,7 @@ const rateLimit = require('express-rate-limit');
 const apiRoutes = require('./routes');
 const { handleOfflineGet } = require('./data/offlineFallbackData');
 const { notFoundHandler, errorHandler } = require('./middleware/errorMiddleware');
+const { errorResponse } = require('./utils/responseHandler');
 
 const app = express();
 
@@ -83,11 +84,16 @@ app.use((err, req, res, next) => {
         data,
       });
     }
-    return res.status(200).json({
-      success: true,
-      message: 'Action completed successfully (demo mode)',
-      data: req.body || {},
-    });
+    // A mutating request must never report fabricated success. Echoing the body
+    // back with 200 made failed writes (e.g. a timetable generation that hit a
+    // CastError) look like they had succeeded, so the TC screen advanced a
+    // lifecycle state that was never actually persisted.
+    return errorResponse(
+      res,
+      'Database is unavailable. The request was not processed. Please retry.',
+      503,
+      'DATABASE_UNAVAILABLE'
+    );
   }
   next(err);
 });

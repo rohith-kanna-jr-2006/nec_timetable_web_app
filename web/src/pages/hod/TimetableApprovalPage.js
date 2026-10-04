@@ -139,21 +139,40 @@ export default function TimetableApprovalPage() {
                         {ver.generatedBy || 'TimeTable Coordinator'}
                       </td>
                       <td style={{ padding: '12px 16px' }}>
-                        <Badge
-                          variant={
-                            ver.status === 'PUBLISHED'
-                              ? 'success'
-                              : ver.status === 'APPROVED'
-                              ? 'primary'
-                              : ver.status === 'PENDING_HOD_APPROVAL'
-                              ? 'warning'
-                              : ver.status === 'REJECTED'
-                              ? 'danger'
-                              : 'neutral'
-                          }
-                        >
-                          {ver.status}
-                        </Badge>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                          <span style={{ fontWeight: 600 }}>
+                            {ver.status === 'PUBLISHED' && (
+                              <Badge variant="success">✅ Published</Badge>
+                            )}
+                            {ver.status === 'APPROVED' && (
+                              <Badge variant="primary">✔ Approved by HOD</Badge>
+                            )}
+                            {ver.status === 'PENDING_HOD_APPROVAL' && (
+                              <Badge variant="warning">⏳ Pending HOD Approval</Badge>
+                            )}
+                            {ver.status === 'REJECTED' && (
+                              <div>
+                                <Badge variant="danger">❌ Rejected</Badge>
+                                {ver.rejectionReason && (
+                                  <div style={{ marginTop: '4px', fontSize: '0.75rem', color: 'var(--color-error)' }}>
+                                    Reason: {ver.rejectionReason}
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                            {ver.status === 'GENERATED' && (
+                              <Badge variant="neutral">📋 Draft Generated</Badge>
+                            )}
+                            {!['PUBLISHED', 'APPROVED', 'PENDING_HOD_APPROVAL', 'REJECTED', 'GENERATED'].includes(ver.status) && (
+                              <Badge variant="neutral">{ver.status}</Badge>
+                            )}
+                          </span>
+                          {ver.academicYear && (
+                            <span style={{ fontSize: '0.75rem', color: 'var(--color-outline)' }}>
+                              {ver.academicYear} {ver.semester ? `(${ver.semester})` : ''}
+                            </span>
+                          )}
+                        </div>
                       </td>
                       <td style={{ padding: '12px 16px', textAlign: 'right' }}>
                         <div style={{ display: 'inline-flex', gap: '6px' }}>

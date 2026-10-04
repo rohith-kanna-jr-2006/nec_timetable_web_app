@@ -123,7 +123,7 @@ Retrieve active user session profile during page refresh or session restoration.
 
 ### Role-Based Access Control (RBAC) Matrix
 
-| Domain Operation | Method & Endpoint | FACULTY | AC | HOD | ADMIN |
+| Domain Operation | Method & Endpoint | FACULTY | TC (legacy AC) | HOD | ADMIN |
 | :--- | :--- | :---: | :---: | :---: | :---: |
 | **Authentication** | `POST /api/auth/login`, `GET /api/auth/me` | Allowed | Allowed | Allowed | Allowed |
 | **View Own Timetable** | `GET /api/timetable/faculty/:id` | Allowed | Allowed | Allowed | Allowed |
@@ -131,7 +131,10 @@ Retrieve active user session profile during page refresh or session restoration.
 | **View Workload** | `GET /api/workload`, `/summary` | Allowed | Allowed | Allowed | Allowed |
 | **Submit Absence** | `POST /api/absences` | Allowed | Allowed | Allowed | Allowed |
 | **Approve/Reject Absence** | `PATCH /api/absences/:id/status` | **403** | **403** | Allowed | Allowed |
-| **Assign Substitute** | `POST /api/substitutes` | **403** | **403** | Allowed | Allowed |
+| **Assign Substitute** | `POST /api/substitutes` | **403** | Allowed | Allowed | Allowed |
+| **Resolve Affected Session** | `GET /api/substitutes/affected-sessions` | **403** | Allowed | Allowed | Allowed |
+| **Eligible Substitute Faculty** | `GET /api/substitutes/eligible-faculty` | **403** | Allowed | Allowed | Allowed |
+| **Update Substitute Status** | `PATCH /api/substitutes/:id/status` | **403** | Allowed | Allowed | Allowed |
 | **Course Candidate Handlers**| `POST/PUT/DELETE /api/course-faculty-handlers` | **403** | Allowed | Allowed | Allowed |
 | **Create Timetable Version** | `POST /api/timetable/version` | **403** | Allowed | Allowed | Allowed |
 | **Approve / Publish Timetable**| `PATCH /api/timetable/version/:id/status` | **403** | **403** | Allowed | Allowed |
@@ -547,11 +550,26 @@ Approve or reject allocation.
 
 ### `GET /api/timetable/faculty/:facultyId`
 Get scheduled sessions for a faculty member.
-- **Query Params**: `versionId` (optional; defaults to published or latest active version, preventing historical leakage)
+- **Query Params**: `versionId` (optional)
+- **Public default (no `versionId`)**: `PUBLISHED` versions only — unchanged.
+- **Internal review (`versionId` given, Phase 5)**: returns exactly that version's
+  sessions where this faculty is the primary instructor **or** appears in
+  `facultyAssignments[]` (`ADDITIONAL`, `OPTIONAL`, `MATHS_BME`, `ENGLISH`).
+  One class session stays one session; it is never split into one row per faculty.
+  Unknown `versionId` → `404 VERSION_NOT_FOUND`.
+- **Response** adds `timetableVersionId`, `timetableVersion`, `status`,
+  `isInternalReview`, `facultyCount` and `roles` alongside `sessionCount`/`sessions`.
 
 ### `GET /api/timetable/class/:academicContextId`
 Get class timetable grid.
 - **Query Params**: `versionId` (optional; defaults strictly to published version)
+- **Internal review (`versionId` given, Phase 5)**: serves that **exact** version —
+  never a newer one — for `DRAFT`, `GENERATED`, `PENDING_HOD_APPROVAL`, `APPROVED`
+  and `PUBLISHED`, after RBAC + context-ownership checks. A version belonging to
+  another context returns `409 TIMETABLE_VERSION_CONTEXT_MISMATCH`.
+  The response adds `status`, `versionId`, `isInternalReview` and a `summary`
+  block (`courseCount`, `sessionCount`, `scheduledPeriods`, `conflictCount`,
+  `facultyCount`).
 - **Missing Timetable != Missing Data**: When a valid context has no published timetable, returns HTTP 200 with actionable workflow state:
   ```json
   {
@@ -590,10 +608,85 @@ Get current published timetable for a class.
 Review Matrix endpoint with exact academic context and timetable version isolation.
 - **Aliases**: `GET /api/timetable/matrix`
 - **Query Params**: `academicContextId`, `timetableVersionId` / `versionId`
-- **Response**: Structured payload containing `academicContext`, `timetableVersion`, `sessionCount`, and `sessions` list with canonical `courseName` from Course Master.
+- **Explicit `versionId` wins (Phase 5)**: there is no global fallback — the response
+  is exactly that context + that version, or `409 TIMETABLE_VERSION_CONTEXT_MISMATCH`.
+- **Response**: `academicContext`, `timetableVersion`, `status`, `isInternalReview`,
+  `sessionCount`, a `summary` block, and a `sessions` list with canonical `courseName`
+  from Course Master and the complete `facultyAssignments[]` per session.
+- **Performance**: sessions, then courses, are loaded in two batched queries
+  (the previous implementation issued one `Course` lookup per session).
+
+### `GET /api/timetable/design-context/:academicContextId`
+Authoritative TC timetable design dataset (Phase 3). Read-only.
+- **Access**: `TC`, `HOD`, `ADMIN` (legacy `AC` accepted during migration)
+- **Response**: curriculum courses with required periods, HOD-approved faculty, allocation status, elective selection, readiness state, and the current version.
+
+### `POST /api/timetable/generate-from-context`
+Generate a timetable from the TC Design Context using the CSP solver (Phase 4).
+This is the preferred generation path: the server re-derives the course list, the
+HOD-approved faculty and the period counts from HOD allocations, so the client
+cannot override them.
+
+- **Access**: `TC`, `ADMIN` (legacy `AC` accepted during migration). `HOD` and `FACULTY` receive **403** — timetable design authority belongs to the TC.
+- **Rate limit**: 20 requests per 10 minutes per client
+- **Body**:
+
+  | Field | Type | Required | Notes |
+  | :--- | :--- | :---: | :--- |
+  | `academicContextId` | ObjectId | Yes | Authoritative anchor for the whole run |
+  | `timetableVersionId` | ObjectId | No | Reuse a specific working version. Must belong to `academicContextId`. A `PUBLISHED` or `APPROVED` version is rejected with `VERSION_LOCKED`. |
+  | `assignmentPlan` | Array | No | TC design intent. Validated against HOD truth; mismatches are rejected, never silently applied. |
+  | `generationSeed` | Number | No | Same seed reproduces an identical timetable |
+  | `options` | Object | No | Solver tuning (`maxNodes`, `maxBacktracks`, `timeoutMs`) |
+
+- **Success** — `201`:
+
+  ```json
+  {
+    "success": true,
+    "data": {
+      "timetableVersionId": "...",
+      "status": "GENERATED",
+      "sessionsCreated": 27,
+      "sessions": [ /* persisted TimetableSession[] */ ],
+      "metrics": { "variablesCount": 21, "durationMs": 34, "generationSeed": 4242 },
+      "designContext": { "readiness": {}, "electiveSelection": {} }
+    }
+  }
+  ```
+
+- **Errors**:
+
+  | Code | Status | Meaning |
+  | :--- | :---: | :--- |
+  | `VALIDATION_ERROR` | 400 | Malformed body or invalid ObjectId |
+  | `ASSIGNMENT_PLAN_INVALID` | 400 | Plan conflicts with authoritative HOD data |
+  | `CONTEXT_NOT_FOUND` | 404 | Unknown academic context |
+  | `ALLOCATION_INCOMPLETE` | 409 | HOD has not allocated every required course |
+  | `ELECTIVE_SELECTION_REQUIRED` | 409 | Curriculum elective slots are not filled |
+  | `VERSION_LOCKED` | 409 | Target version is `PUBLISHED` / `APPROVED` |
+  | `TIMETABLE_VERSION_CONTEXT_MISMATCH` | 409 | Version belongs to a different context |
+  | `UNSATISFIABLE_CONSTRAINTS` | 409 | No valid timetable exists. `diagnostics.failureReason` names the blocking course. |
+  | `DATABASE_UNAVAILABLE` | 503 | Database unreachable; the request was not processed |
+
+> A failed run never leaves a `GENERATED` version behind, and a mutating request
+> never reports fabricated success.
 
 ### `GET /api/timetable/versions`
 List timetable versions.
+- **Query Params**: `academicContextId` (scopes the query in the database — the list
+  is never globally sorted and filtered client-side), plus legacy `department`,
+  `semester`, `academicYear`, `status`.
+- **Ordering**: `createdAt` desc, then `version` desc, then `_id` desc. Ordering never
+  depends on the human-readable `versionLabel`, so `v1.0` is not assumed to be latest.
+
+### `GET /api/timetable/version/:id`
+Single timetable version, shaped for review screens (Phase 5).
+- **Response**: `_id`, `academicContextId`, `academicContext`, `status`, `version`,
+  `versionLabel`, `generatedBy`, `submittedBy`, `submittedAt`, `approvedBy`,
+  `approvedAt`, `publishedAt`, `rejectionReason`, `hardConflicts`,
+  `totalScheduledPeriods`, `editable`, `createdAt`, `updatedAt`.
+- **Errors**: `404 VERSION_NOT_FOUND` for an unknown version.
 
 ### `POST /api/timetable/version`
 Create candidate timetable version.
@@ -601,7 +694,128 @@ Create candidate timetable version.
 ### `PATCH /api/timetable/version/:id/status`
 State machine transition:
 `NO_TIMETABLE -> GENERATED -> PENDING_HOD_APPROVAL -> APPROVED -> PUBLISHED`
-- **Access**: Transition to `APPROVED` or `PUBLISHED` requires HOD or ADMIN.
+`PUBLISHED -> (terminal)` · `REJECTED -> DRAFT | GENERATED`
+- **Access**: Transition to `APPROVED`, `REJECTED` or `PUBLISHED` requires HOD or ADMIN.
+  Transition to `DRAFT`, `GENERATED` or `PENDING_HOD_APPROVAL` requires `TC` (legacy
+  `AC`) or ADMIN.
+- **Body**: `{ "status": "...", "rejectionReason"?: string, "academicContextId"?: ObjectId }`
+
+#### HOD approval, rejection and publication (Phase 6)
+
+This single endpoint is also the complete governance API; no new route was added.
+Authority is evaluated **before** the state machine, so a caller without permission
+always receives `403` and never a `409` that would imply the edge itself was merely invalid.
+
+| Target | Allowed from | Authority |
+| :--- | :--- | :--- |
+| `APPROVED` | `PENDING_HOD_APPROVAL` | HOD, ADMIN |
+| `REJECTED` | `PENDING_HOD_APPROVAL` | HOD, ADMIN |
+| `PUBLISHED` | `APPROVED` | HOD, ADMIN |
+
+- **Unauthenticated** — `401`. **TC / FACULTY** targeting any approval status —
+  `403 STATE_TRANSITION_ERROR`. A `TC` may never move a version out of
+  `PENDING_HOD_APPROVAL`, even to `GENERATED`.
+- **HOD may not design.** Targeting `DRAFT`, `GENERATED` or
+  `PENDING_HOD_APPROVAL` is `403 STATE_TRANSITION_ERROR`.
+- **Exact version, exact context.** `PUBLISHED` is reachable only from `APPROVED`,
+  so an approved revision is never published by accident. When `academicContextId`
+  is supplied it must equal the version's own context anchor; otherwise
+  `409 TIMETABLE_VERSION_CONTEXT_MISMATCH` and the version is left untouched.
+- **Skipped edges** (for example `GENERATED -> PUBLISHED`, or any transition out of
+  `PUBLISHED`) are `409 INVALID_TIMETABLE_STATUS_TRANSITION`.
+- **Unknown version** — `404 VERSION_NOT_FOUND`.
+- **Rejection** — `rejectionReason`, when present, must be a non-empty string of at
+  most 500 characters (`400 BAD_REQUEST`). It is stored on the exact
+  `TimetableVersion` as `rejectionReason` and returned by `GET /version/:id`.
+
+> **Legacy edges retained.** `ALLOWED_TRANSITIONS` still permits
+> `APPROVED -> REJECTED` and `REJECTED -> DRAFT | GENERATED`. These predate Phase 6
+> and were deliberately left in place: `REJECTED` is also a member of
+> `MUTABLE_VERSION_STATUSES`, which three solver version-resolution fallbacks
+> depend on, so removing the edge without reworking that lookup would leave the
+> state machine and version resolution disagreeing. Phase 6 does not rely on
+> them — the rejection workflow below mandates a **new** version — so tightening
+> them is a separate, self-contained follow-up.
+
+#### Governance-version immutability (Phase 6)
+
+`PENDING_HOD_APPROVAL`, `APPROVED`, `PUBLISHED` and `REJECTED` are all frozen
+artifacts (`FROZEN_TIMETABLE_STATUSES` in `services/timetableSubmissionService.js`):
+
+| Endpoint | Result |
+| :--- | :--- |
+| `POST /api/timetable/session` | `409 TIMETABLE_VERSION_NOT_EDITABLE` |
+| `DELETE /api/timetable/session/:id` | `409 TIMETABLE_VERSION_NOT_EDITABLE` |
+| `POST /api/timetable/generate-from-context` (same version) | `409 VERSION_LOCKED` |
+
+A **rejected** version is closed, not merely read-only: the revision workflow
+requires a **new** version, so the rejected record and its sessions are preserved
+as history and never edited in place. The generation engine keeps its own narrower
+lock because a `REJECTED` version may still be re-driven into `GENERATED` by the
+solver. On `REJECTED`, `submittedBy`/`submittedAt` are cleared so the revision
+history stays honest.
+
+#### Publication and public visibility
+
+Publishing sets `PUBLISHED`; it does **not** archive or delete the previous
+published version. `GET /api/timetable/class/:academicContextId` and
+`GET /api/timetable/published/:academicContextId` always serve the **newest**
+`PUBLISHED` version for that context, so superseded versions immediately stop
+being public while remaining available for internal review by `versionId`. Only
+`PUBLISHED` versions are ever public — `GENERATED` and `PENDING_HOD_APPROVAL`
+data never appears, and one context's read never returns another context's
+sessions.
+
+#### TC submission — `GENERATED -> PENDING_HOD_APPROVAL` (Phase 5)
+
+This endpoint **is** the submission API; there is no separate `/submit-timetable`.
+`PATCH .../status` with `{"status":"PENDING_HOD_APPROVAL"}` runs a submission gate
+before the version becomes a review artifact. Optional `academicContextId` asserts the
+context the TC believes it is submitting.
+
+Gate order and failures:
+
+| # | Check | Failure |
+| :--- | :--- | :--- |
+| 1 | Version exists | `404 VERSION_NOT_FOUND` |
+| 2 | Version anchored to an `AcademicContext` | `409 TIMETABLE_NOT_READY_FOR_SUBMISSION` (`MISSING_ACADEMIC_CONTEXT`) |
+| 3 | Caller holds design authority | `403 UNAUTHORIZED_TIMETABLE_SUBMISSION` |
+| 4 | Version is `GENERATED` | `409 TIMETABLE_NOT_READY_FOR_SUBMISSION` (`INVALID_STATE` / `ALREADY_SUBMITTED`), `409 TIMETABLE_VERSION_NOT_EDITABLE` (already `APPROVED`/`PUBLISHED`) |
+| 5 | Version belongs to the claimed context | `409 TIMETABLE_VERSION_CONTEXT_MISMATCH` |
+| 6 | At least one scheduled session | `409 TIMETABLE_NOT_READY_FOR_SUBMISSION` (`sessionCount: 0`) |
+| 7 | No orphan sessions (every session belongs to that context **and** version) | `409 TIMETABLE_NOT_READY_FOR_SUBMISSION` (`ORPHAN_SESSIONS`) |
+| 8 | HOD allocations unchanged since generation | `409 HOD_ALLOCATION_CHANGED_AFTER_GENERATION` |
+| 9 | Existing hard-constraint validator passes | `409 TIMETABLE_VALIDATION_FAILED` |
+
+- **Step 8 details** name each conflict: `courseCode`, `generatedFaculty`,
+  `currentApprovedFaculty`. A course whose allocation is *absent* is reported as a
+  non-blocking warning (`HOD_ALLOCATION_MISSING`) rather than blocking, so legacy
+  contexts keep working during the AC → TC migration.
+- **Step 9** reuses `services/timetable/timetableValidator.js`. Data-integrity findings
+  (`CLASS_TIME_CONFLICT`, `DUPLICATE_SESSION`, `FACULTY_TIME_CONFLICT`,
+  `HOD_FACULTY_MISMATCH`, `INVALID_PERIOD`) block submission. Solver layout heuristics
+  (period counts, lab block shape, theory packing) are returned as non-blocking
+  `warnings`, because a version may legitimately be hand-assembled by the TC.
+- **Success** — `200`: the updated version plus a `submission` block echoing exactly
+  what was sent (`sessionCount`, `summary`, `validation.warningCount`), and
+  `submittedBy` / `submittedAt` stamped on the version.
+- **Migration**: `submittedAt` is a new optional `TimetableVersion` field, default
+  `null`. Existing documents are unaffected and need no backfill.
+
+#### Submitted-version immutability (Phase 5)
+
+Once a version is `PENDING_HOD_APPROVAL` it is a frozen review artifact:
+
+| Endpoint | Result |
+| :--- | :--- |
+| `POST /api/timetable/session` | `409 TIMETABLE_VERSION_NOT_EDITABLE` |
+| `DELETE /api/timetable/session/:id` | `409 TIMETABLE_VERSION_NOT_EDITABLE` |
+| `POST /api/timetable/generate-from-context` (same version) | `409 VERSION_LOCKED` |
+
+The only sanctioned revision path is
+`PENDING_HOD_APPROVAL -> REJECTED -> new version -> GENERATED -> PENDING_HOD_APPROVAL`.
+See **Governance-version immutability (Phase 6)** below for the full frozen-status
+matrix, and **Publication and public visibility** for what `PUBLISHED` means.
 
 ### `POST /api/timetable/solve`
 Automatic timetable solver invoking the Constraint Satisfaction & Optimization Problem (CSOP/CSP) engine.
@@ -715,3 +929,69 @@ HOD approval/rejection of leave.
 
 ### `GET /api/substitutes` & `POST /api/substitutes`
 Assign substitute faculty to a scheduled timetable session without altering historical workload.
+
+**Authorization:** `HOD`, `TC`, `ADMIN` (and legacy `AC` during migration). `FACULTY` receives `403`. This grant is scoped to substitute mapping and confers no HOD faculty-allocation authority on TC.
+
+Phase 7 makes `POST /api/substitutes` fully server-validated. The backend resolves the affected session and evaluates eligibility itself; the request body is never trusted on its own.
+
+Request fields:
+
+| Field | Required | Notes |
+| --- | --- | --- |
+| `absenceId` | Yes | Authoritative source of `facultyId` and `date`. |
+| `substituteFacultyId` | Yes | Must exist and be active. |
+| `period` | Yes | Slot period, e.g. `P1`. |
+| `timetableSessionId` | No | When supplied it must be one of the deterministically resolved affected sessions. |
+| `academicContextId` | No | When the absence carries one, the request must match it. |
+| `timetableVersionId` | No | Pins resolution to an exact version. |
+| `date`, `originalFacultyId`, `status` | No | Accepted for backward compatibility and cross-checked; the absence record wins. |
+
+On success the response `meta.resolvedSession` carries the exact affected session.
+
+Structured errors (`error.details` always populated):
+
+| Code | HTTP | Meaning |
+| --- | --- | --- |
+| `ABSENCE_NOT_FOUND` | 404 | Unknown `absenceId`. |
+| `ABSENCE_NOT_APPROVED` | 409 | Absence status is `REJECTED`. |
+| `DATE_ABSENCE_MISMATCH` | 409 | Body `date` contradicts the absence date. |
+| `INVALID_ABSENCE_DATE` | 400 | Malformed date, or a Sunday / non Mon-Sat working day. |
+| `ABSENCE_CONTEXT_MISMATCH` | 409 | Absence context differs from the requested context. |
+| `SESSION_NOT_FOUND` | 404 | Unknown `timetableSessionId`. |
+| `SESSION_NOT_AFFECTED_BY_ABSENCE` | 409 | The named session is not one the absence affects. |
+| `SESSION_CONTEXT_MISMATCH` | 409 | Named session belongs to another context. |
+| `SESSION_VERSION_MISMATCH` | 409 | Named session belongs to another timetable version. |
+| `NO_AFFECTED_SESSION` | 404 | No session matches faculty + date + period. |
+| `AMBIGUOUS_AFFECTED_SESSION` | 409 | More than one session matches; resolve the exact one first. |
+| `SUBSTITUTE_FACULTY_NOT_FOUND` | 404 | Unknown substitute. |
+| `SUBSTITUTE_FACULTY_INACTIVE` | 409 | Substitute is inactive. |
+| `SUBSTITUTE_IS_ORIGINAL_FACULTY` | 409 | Substitute is the absent faculty. |
+| `SUBSTITUTE_NOT_ELIGIBLE` | 409 | `details.reasons` lists why. |
+| `DUPLICATE_SUBSTITUTE_MAPPING` | 409 | Identical active mapping already exists. |
+
+`SUBSTITUTE_NOT_ELIGIBLE` reasons: `CONFLICTING_TIMETABLE_SESSION`, `ABSENT_ON_DATE`, `MARKED_UNAVAILABLE`, `PREFERRED_OFF`, `CONFLICTING_SUBSTITUTE_MAPPING`, `IS_ORIGINAL_FACULTY`.
+
+### `GET /api/substitutes/affected-sessions`
+Resolve the exact `TimetableSession(s)` an absence affects. Authorization: `HOD`, `TC`, `ADMIN` (+ legacy `AC`).
+
+Query: `absenceId` (or `facultyId` + `date` + `period`), plus optional `academicContextId` / `timetableVersionId`.
+
+Resolution is deterministic: the date is converted to its weekday in UTC and matched against `TimetableSession` on `day` + `period` + faculty (as `facultyId` or inside `facultyAssignments`), always scoped to the supplied context/version. It never falls back to a first match or a default faculty.
+
+Response `data`: `date`, `day`, `period`, `facultyId`, `sessionCount`, `ambiguity` (`MULTIPLE_MATCHING_SESSIONS` or `null`), and `sessions[]` each carrying `timetableSessionId`, `academicContextId`, `timetableVersionId`, `absenceId`, `originalFacultyId`, `originalFacultyName`, `date`, `day`, `period`, `courseCode`, `courseName`, `section`, `year`, `academicYear`, `semester`, `room`, `sessionType`, `duration`, `facultyAssignments`, `facultyCount`.
+
+A zero-match result is a normal `200` with `sessionCount: 0`, not an error.
+
+### `GET /api/substitutes/eligible-faculty`
+Server-side eligibility for one exact slot. Authorization: `HOD`, `TC`, `ADMIN` (+ legacy `AC`).
+
+Query: `timetableSessionId` (required), plus optional `absenceId`, `academicContextId`, `timetableVersionId`.
+
+Returns only faculty satisfying **all** of: active faculty record, not the original faculty, not absent on the date, no other `TimetableSession` at that day/period, not `UNAVAILABLE`/`PREFERRED_OFF` in `FacultyAvailability`, and no conflicting `PENDING`/`ACCEPTED` substitute mapping for the slot. The full faculty master is never returned for client-side filtering.
+
+Response `data`: `timetableSessionId`, `absenceId`, `date`, `day`, `period`, `eligibleCount`, `eligibleFaculty[]` (`facultyId`, `facultyName`, `department`, `designation`).
+
+Errors: `SESSION_REQUIRED` (400), `SESSION_NOT_FOUND` (404), `ABSENCE_NOT_FOUND` (404), `DATE_REQUIRED` (400), `SESSION_CONTEXT_MISMATCH` (409).
+
+### `PATCH /api/substitutes/:id/status`
+Accept / reject / cancel a mapping. Authorization: `HOD`, `TC`, `ADMIN` (+ legacy `AC`). `FACULTY` receives `403`.

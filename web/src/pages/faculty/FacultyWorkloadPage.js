@@ -16,7 +16,7 @@ export default function FacultyWorkloadPage() {
   const [workload, setWorkload] = useState(null);
   const [allocationsData, setAllocationsData] = useState(null);
 
-  const facultyId = user?.facultyId || 'FWL-03';
+  const facultyId = user?.facultyId || null;
   const facultyName = user?.name || 'Faculty Member';
 
   const loadWorkload = async () => {
@@ -43,7 +43,12 @@ export default function FacultyWorkloadPage() {
   };
 
   useEffect(() => {
-    loadWorkload();
+    if (facultyId) {
+      loadWorkload();
+    } else {
+      setError('Faculty ID not available. Please log in again.');
+      setLoading(false);
+    }
   }, [facultyId]);
 
   const summary = workload?.summary || allocationsData?.summary || {};

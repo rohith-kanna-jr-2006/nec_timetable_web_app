@@ -18,7 +18,18 @@ const DEMO_USERS = {
     id: '65f0a0000000000000000002',
     name: 'Mr. R. Manikandan',
     email: 'ac@nec.edu.in',
+    // Legacy AC entry kept for backward-compatibility during migration.
+    // New logins should use tc@nec.edu.in.
     role: 'AC',
+    facultyId: 'FWL-22',
+    isActive: true,
+  },
+  'tc@nec.edu.in': {
+    _id: '65f0a0000000000000000005',
+    id: '65f0a0000000000000000005',
+    name: 'Mr. R. Manikandan',
+    email: 'tc@nec.edu.in',
+    role: 'TC',
     facultyId: 'FWL-22',
     isActive: true,
   },

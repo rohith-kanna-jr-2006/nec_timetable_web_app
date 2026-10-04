@@ -23,10 +23,22 @@ async function seedUsers() {
       isActive: true,
     },
     {
+      // Legacy AC account — kept for backward-compatibility during migration.
+      // After all client sessions using AC tokens expire, this account can be
+      // updated to role: 'TC'. Do NOT delete it — it maps to facultyId FWL-22.
       name: 'Mr. R. Manikandan',
       email: 'ac@nec.edu.in',
       passwordHash,
       role: 'AC',
+      facultyId: 'FWL-22',
+      isActive: true,
+    },
+    {
+      // TC account — canonical TimeTable Coordinator login (same faculty, new role).
+      name: 'Mr. R. Manikandan',
+      email: 'tc@nec.edu.in',
+      passwordHash,
+      role: 'TC',
       facultyId: 'FWL-22',
       isActive: true,
     },
@@ -59,8 +71,13 @@ async function seedUsers() {
       const desigLower = (f.designation || '').toLowerCase();
       let role = 'FACULTY';
       if (desigLower.includes('hod')) role = 'HOD';
-      else if ((f.responsibilities || []).some((r) => (r.role || '').toLowerCase().includes('academic coordinator'))) {
-        role = 'AC';
+      // Faculty with an 'academic coordinator' or 'timetable coordinator' responsibility
+      // are the TimeTable Coordinator (TC) — they hold timetable-design authority.
+      else if ((f.responsibilities || []).some((r) =>
+        (r.role || '').toLowerCase().includes('academic coordinator') ||
+        (r.role || '').toLowerCase().includes('timetable coordinator')
+      )) {
+        role = 'TC';
       }
 
       users.push({
