@@ -1,4 +1,5 @@
 const AcademicContext = require('../models/AcademicContext');
+const { resolveAcademicYearRange } = require('../utils/academicYearRange');
 const { successResponse, errorResponse } = require('../utils/responseHandler');
 
 /**
@@ -7,18 +8,38 @@ const { successResponse, errorResponse } = require('../utils/responseHandler');
  */
 async function getContexts(req, res, next) {
   try {
-    const { department, semester, academicYear, year, section, status } = req.query;
+    const { department, semester, academicYear, year, section, status, academicYearFrom, academicYearTo } = req.query;
     const query = {};
 
     if (department) query.department = department.toUpperCase().trim();
     if (semester) query.semester = semester.trim();
-    if (academicYear) query.academicYear = academicYear.trim();
+
+    // Phase 8: an explicit canonical range filters on the authoritative fields.
+    // A legacy academicYear string is resolved to that range before querying so
+    // both spellings select exactly the same contexts.
+    const requestedRange = resolveAcademicYearRange({
+      academicYear,
+      academicYearFrom,
+      academicYearTo,
+    });
+    if (academicYear || academicYearFrom || academicYearTo) {
+      if (!requestedRange) {
+        return errorResponse(
+          res,
+          'Academic year filter must be a canonical YYYY-YY range or a valid academicYearFrom/academicYearTo pair',
+          400,
+          'INVALID_ACADEMIC_YEAR'
+        );
+      }
+      query.academicYearFrom = requestedRange.academicYearFrom;
+      query.academicYearTo = requestedRange.academicYearTo;
+    }
     if (year) query.year = year.trim();
     if (section) query.section = section.toUpperCase().trim();
     if (status) query.status = status.toUpperCase().trim();
 
     const contexts = await AcademicContext.find(query).sort({
-      academicYear: -1,
+      academicYearFrom: -1,
       year: 1,
       section: 1,
     });
@@ -75,10 +96,22 @@ async function getContextById(req, res, next) {
  */
 async function createContext(req, res, next) {
   try {
-    const { academicYear, semester, department, year, section, program, status } = req.body;
+    const { academicYear, academicYearFrom, academicYearTo, semester, department, year, section, program, status } = req.body;
 
+    const range = resolveAcademicYearRange({ academicYear, academicYearFrom, academicYearTo });
+    if (!range) {
+      return errorResponse(
+        res,
+        'A valid academic year is required. Supply academicYearFrom/academicYearTo with academicYearFrom < academicYearTo, or a canonical academicYear such as 2026-27.',
+        400,
+        'INVALID_ACADEMIC_YEAR'
+      );
+    }
+
+    // Phase 8: identity is the canonical range, not the legacy display string.
     const existing = await AcademicContext.findOne({
-      academicYear: academicYear.trim(),
+      academicYearFrom: range.academicYearFrom,
+      academicYearTo: range.academicYearTo,
       semester: semester.trim(),
       department: department.toUpperCase().trim(),
       year: year.trim(),
@@ -88,14 +121,16 @@ async function createContext(req, res, next) {
     if (existing) {
       return errorResponse(
         res,
-        'Academic context with this year, semester, department, year and section already exists',
+        'Academic context with this academic year range, semester, department, year and section already exists',
         409,
-        'DUPLICATE_CONTEXT'
+        'DUPLICATE_CONTEXT',
+        { academicContextId: existing._id }
       );
     }
 
     const context = await AcademicContext.create({
-      academicYear: academicYear.trim(),
+      academicYearFrom: range.academicYearFrom,
+      academicYearTo: range.academicYearTo,
       semester: semester.trim(),
       department: department.toUpperCase().trim(),
       year: year.trim(),

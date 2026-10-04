@@ -369,7 +369,27 @@ The UI should use these states to select the appropriate next action.
 
 ---
 
-## 10a. Absence and substitute mapping (Phase 7)
+## 10a. Academic year range (Phase 8)
+
+The canonical representation of an academic year is an explicit pair:
+
+```text
+academicYearFrom = 2026
+academicYearTo   = 2027
+```
+
+`AcademicContext.academicYear` (e.g. `'2026-27'`) is retained only as a **derived compatibility mirror**, so existing consumers keep working. It is never the source of truth.
+
+Rules:
+
+- A `pre('validate')` hook resolves the canonical pair. A legacy `academicYear` string is parsed into the range; when a range is present the mirror is regenerated from it.
+- Only the canonical `YYYY-YY` format is accepted. Anything else (`2026/27`, `2026`, `2026–27`) is rejected rather than guessed, because a wrong guess would corrupt the identity of a context.
+- `academicYearFrom < academicYearTo` is enforced. `from == to`, `from > to`, and a missing side are all invalid.
+- Context identity is `academicYearFrom + academicYearTo + semester + department + year + section`, so `2026-27 / III-A` and `2027-28 / III-A` are distinct contexts.
+
+Helpers live in `src/utils/academicYearRange.js` (`parseAcademicYear`, `formatAcademicYear`, `isValidRange`, `resolveAcademicYearRange`) and the backfill is `src/migrations/migrateAcademicYearRange.js`, which is idempotent and non-destructive.
+
+## 10b. Absence and substitute mapping (Phase 7)
 
 The substitute workflow is backend-authoritative end to end:
 
@@ -395,6 +415,25 @@ SubstituteAllocation (persisted)
 **Immutability.** Substitute data is stored only on `SubstituteAllocation`. `TimetableSession` is never mutated to carry substitute state, so `academicContextId`, `timetableVersionId`, `courseCode`, `sessionType`, `day`, `period`, `room` and `facultyAssignments` keep their meaning and historical workload is unaffected.
 
 **Context and version anchoring.** `FacultyAbsence.academicContextId` and `SubstituteAllocation.academicContextId` / `.timetableVersionId` / `.day` are optional additions so that pre-Phase-7 records remain valid without a migration. Every mapping written by the service persists them, which is what makes cross-context and cross-version mapping detectable.
+
+---
+
+## 10c. Class Advisor scoping (Phase 8)
+
+A class advisor is scoped to an **exact AcademicContext**, never to a display string such as `III-A` or `2026-27`.
+
+```text
+2026-27 / III-A -> Faculty X   (AcademicContext #a)
+2027-28 / III-A -> Faculty Y   (AcademicContext #b)
+```
+
+These are different contexts, so both assignments are active at the same time and neither overwrites the other. Reassigning within one context deactivates only that context's previous advisor; assignments in other academic years are untouched.
+
+Invariants:
+
+- At most one **ACTIVE** advisor per `academicContextId`, enforced both in the service (deactivate-then-create) and by the partial unique index `active_advisor_per_context_idx`. `INACTIVE` history is unconstrained and is retained.
+- `GET /api/class-advisors` requires authentication.
+- Write authority is unchanged: HOD assigns, ADMIN overrides. TC and FACULTY are refused.
 
 ---
 

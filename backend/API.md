@@ -141,6 +141,7 @@ Retrieve active user session profile during page refresh or session restoration.
 | **Create Draft Allocation** | `POST /api/hod-allocations` | **403** | Allowed | Allowed | Allowed |
 | **Approve HOD Allocation** | `PATCH /api/hod-allocations/:id/status` | **403** | **403** | Allowed | Allowed |
 | **Assign Class Advisor** | `POST /api/class-advisors` | **403** | **403** | Allowed | Allowed |
+| **View Class Advisors** | `GET /api/class-advisors` | Allowed | Allowed | Allowed | Allowed |
 | **Create/Update Faculty** | `POST/PUT /api/faculty` | **403** | **403** | Allowed | Allowed |
 | **Delete Faculty Master** | `DELETE /api/faculty/:facultyId` | **403** | **403** | **403** | Allowed |
 
@@ -926,6 +927,45 @@ Submit and track faculty leave.
 
 ### `PATCH /api/absences/:id/status`
 HOD approval/rejection of leave.
+
+### `GET /api/class-advisors` & `POST /api/class-advisors`
+Assign a class advisor to an **exact AcademicContext**. Authorization: `HOD`, `ADMIN`. `TC` and `FACULTY` receive `403`; an unauthenticated call receives `401` (including on `GET`, which previously had no authentication).
+
+**Scoping (Phase 8).** The advisor is scoped by `academicContextId`, never by a display string such as `III-A` or `2026-27`. Because `2026-27 / III-A` and `2027-28 / III-A` are different AcademicContexts, both assignments can be active simultaneously and neither overwrites the other. Reassigning inside one context deactivates only that context's previous advisor; other academic years and `INACTIVE` history are preserved.
+
+Request body:
+
+| Field | Required | Notes |
+| --- | --- | --- |
+| `academicContextId` | Yes | Must be a valid ObjectId and must exist. |
+| `facultyId` | Yes | Must exist and be active. |
+
+At most one `ACTIVE` assignment per `academicContextId` (service check plus partial unique index `active_advisor_per_context_idx`).
+
+Structured errors:
+
+| Code | HTTP | Meaning |
+| --- | --- | --- |
+| `VALIDATION_ERROR` | 400 | Missing field, or `academicContextId` is not a valid ObjectId. |
+| `CONTEXT_NOT_FOUND` | 404 | The AcademicContext does not exist. |
+| `FACULTY_REQUIRED` | 400 | Missing `facultyId`. |
+| `FACULTY_NOT_FOUND` | 404 | Unknown faculty. |
+| `FACULTY_INACTIVE` | 409 | Faculty is inactive. |
+| `DUPLICATE_CLASS_ADVISOR` | 409 | A concurrent write produced a second active advisor. |
+
+### Academic year range (Phase 8)
+
+`AcademicContext` exposes the canonical pair `academicYearFrom` / `academicYearTo` (integers, e.g. `2026` / `2027`). The legacy `academicYear` string (`'2026-27'`) is retained as a **derived compatibility mirror** and is never the source of truth.
+
+- `GET /api/academic-contexts` accepts `academicYearFrom` + `academicYearTo`, or the legacy `academicYear`. Both spellings select the same contexts.
+- `POST /api/academic-contexts` accepts the canonical pair or the legacy string.
+- `academicYearFrom < academicYearTo` is required; `from == to`, `from > to`, a missing side, and a non-canonical string are rejected.
+
+Errors: `INVALID_ACADEMIC_YEAR` (400, malformed or incomplete range), `DUPLICATE_CONTEXT` (409, identity already exists).
+
+Context identity is `academicYearFrom + academicYearTo + semester + department + year + section`.
+
+Migration: `node backend/src/migrations/migrateAcademicYearRange.js` — idempotent, non-destructive, preserves every `_id`, and reports unparseable records instead of guessing.
 
 ### `GET /api/substitutes` & `POST /api/substitutes`
 Assign substitute faculty to a scheduled timetable session without altering historical workload.

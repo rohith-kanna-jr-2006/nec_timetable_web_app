@@ -60,8 +60,8 @@ const FACULTY_EMAIL = 'p7_substitute_fac@nec.edu.in';
 // Fixture identifiers. All are unique to this suite so cleanup can never touch
 // seeded data even if the suite aborts early.
 const RUN_TAG = 'P7SUB';
-const CTX_A = { academicYear: '2099-2020', semester: '1', department: 'CSE', year: 'III', section: 'A', program: 'UG' };
-const CTX_B = { academicYear: '2099-2021', semester: '1', department: 'CSE', year: 'III', section: 'B', program: 'UG' };
+const CTX_A = { academicYearFrom: 2099, academicYearTo: 2100, semester: '1', department: 'CSE', year: 'III', section: 'A', program: 'UG' };
+const CTX_B = { academicYearFrom: 2098, academicYearTo: 2099, semester: '1', department: 'CSE', year: 'III', section: 'B', program: 'UG' };
 
 const createdUserEmails = [];
 const createdContextIds = [];
@@ -579,7 +579,7 @@ async function runTests() {
   // -----------------------------------------------------------------
   console.log('\n-- Section F: Multi-Faculty Sessions ------------------------');
 
-  const multiCtx = await makeContext({ ...CTX_A, academicYear: '2099-2022' }, 'C');
+  const multiCtx = await makeContext({ ...CTX_A, academicYearFrom: 2097, academicYearTo: 2098 }, 'C');
   const multiVersion = await makeVersion(multiCtx, 'P7-Version-Multi');
 
   const multiSession = await makeSession({
