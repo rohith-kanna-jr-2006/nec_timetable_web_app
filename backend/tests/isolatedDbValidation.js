@@ -70,7 +70,10 @@ async function runIsolatedDbValidation() {
     const initialCourseCount = await Course.countDocuments({});
     const initialUserCount = await User.countDocuments({});
 
-    assert(initialFacultyCount === 27, `First seed: Exactly 27 faculty created (got: ${initialFacultyCount})`);
+    // seedFaculty() is the authoritative faculty master: 25 CSE + 2 ECE +
+    // 16 Mathematics + 9 English = 52 Faculty records. FacultyWorkload remains a
+    // separate authoritative dataset of 27, so the two counts differ by design.
+    assert(initialFacultyCount === 52, `First seed: Exactly 52 faculty created (got: ${initialFacultyCount})`);
     assert(initialWorkloadCount === 27, `First seed: Exactly 27 workloads created (got: ${initialWorkloadCount})`);
     assert(initialCourseCount === 119, `First seed: Exactly 119 courses created (got: ${initialCourseCount})`);
     assert(initialUserCount >= 4, `First seed: Standard users created (got: ${initialUserCount})`);
