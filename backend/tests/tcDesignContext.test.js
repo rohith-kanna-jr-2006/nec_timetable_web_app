@@ -452,10 +452,16 @@ async function runTests() {
     // Verify resolveRequiredPeriods matches course totalPeriod
     const sampleCourse = await Course.findOne({ courseCode: courses[0].courseCode });
     if (sampleCourse) {
+      // Phase 11: the resolver returns { requiredPeriods, source, isAuthoritative };
+      // the numeric value it reports must still equal the design-context figure.
       const expected = resolveRequiredPeriods(sampleCourse);
       assert(
-        courses[0].requiredPeriods === expected,
-        `resolveRequiredPeriods(${sampleCourse.courseCode}) = ${expected} matches response`
+        courses[0].requiredPeriods === expected.requiredPeriods,
+        `resolveRequiredPeriods(${sampleCourse.courseCode}) = ${expected.requiredPeriods} matches response`
+      );
+      assert(
+        courses[0].requiredPeriodsSource === expected.source,
+        `requirement source is reported consistently (${courses[0].requiredPeriodsSource})`
       );
     }
   }

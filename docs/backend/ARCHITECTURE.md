@@ -517,6 +517,51 @@ A candidate must belong to the cohort's regulation; otherwise the selection is r
 
 `Course.academicYear` / `curriculumYear` (`"2024-25 onwards"`) express **R22 curriculum applicability** and are unrelated to `AcademicContext.academicYearFrom`/`academicYearTo`, which express an **academic-year range** (Phase 8). These are different concepts and are deliberately not migrated into each other.
 
+## 10f. Course period requirements and workload integrity (Phase 11)
+
+### Canonical requirement chain
+
+There is exactly **one** canonical definition of a course's weekly period requirement:
+
+```text
+Course.totalPeriod            (preferred)
+   or Course.L + T + P        (fallback sum)
+   -> MISSING                 (nothing is invented)
+   -> tcDesignContextService.requiredPeriods
+   -> constraintBuilder totalPeriod / labBlockSize
+   -> solver
+   -> TimetableSession count
+   -> validateTimetable (allocated === requiredPeriods)
+```
+
+`courseRequirementService.resolveCourseRequirement` reports the origin as `TOTAL_PERIOD`, `LTP_SUM` or `MISSING`.
+
+**The historical hidden fallback is removed as a *hidden* path.** The former `|| (isLab ? 4 : 3)` silently invented a period count for any course without a requirement. Generation behaviour is deliberately unchanged for every course that has canonical data, but a requirement-less course now reports `requiredPeriodsSource: 'LEGACY_FALLBACK'` and `requiredPeriodsAuthoritative: false` so the curriculum gap is visible instead of indistinguishable from real data. `validateSessionCounts` reports such courses under `incompleteRequirements`.
+
+`totalPeriod`, `L/T/P` and `contactHours` are compatibility fields on `Course`; `totalPeriod` is canonical, `L/T/P` is its fallback decomposition. **Contact hours are not assumed equal to timetable periods** — no conversion rule is invented.
+
+### Session count semantics
+
+One `period` is one timetable slot. A multi-faculty LAB or MC_SAS is **one class event per slot**: several faculty share the same class session. `validateSessionCounts` counts class `TimetableSession` documents and never multiplies by `facultyCount`, so a 3-faculty LAB with 3 slots is 3 class sessions, not 9. Faculty projections legitimately show the session in several faculty timetables; that does not create extra class events or extra class workload.
+
+### Workload source of truth
+
+```text
+Course requirement + HOD allocation (FacultyWorkload.teaching / .responsibilities)
+        -> backend calculation
+        -> FacultyWorkload.calculated*Hours
+```
+
+- `calculateTeachingHours` sums `teaching.{ugTheory1,ugTheory2,lab1,lab2,pg,others}[].hours`.
+- `calculateResponsibilityHours` sums `responsibilities[].hours`.
+- `calculatedTotalHours` = teaching + responsibilities.
+
+Workload is **HOD-allocation driven**, not session driven: a workload record reflects the allocation a HOD approved. `courseRequirementService.deriveWorkloadTotals` reproduces the same arithmetic for verification.
+
+`calculatedTeachingHours`, `calculatedResponsibilityHours`, `calculatedTotalHours`, `teaching` and `responsibilities` are **backend-authoritative** and are rejected when supplied by a client (`WORKLOAD_FIELD_PROTECTED`, 400). `sourceTotalHours` remains accepted as reference data.
+
+**Ambiguity reported, not guessed:** the repository defines no multiplier distinguishing `PRIMARY` / `ADDITIONAL` / `OPTIONAL` within a multi-faculty LAB, nor between `MATHS_BME` and `ENGLISH` within `MC_SAS`. No such multiplier was invented. Each faculty assignment is stored on the session and counted once in that faculty's own projection; the class event count remains one per slot.
+
 ## 11. Version governance
 
 The normal workflow is:
