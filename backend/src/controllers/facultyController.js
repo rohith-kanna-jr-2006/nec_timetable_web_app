@@ -166,6 +166,7 @@ async function createFaculty(req, res, next) {
       department,
       email,
       phone,
+      dateOfBirth,
       roles,
       teaching: rawTeaching,
       ugTheory1,
@@ -295,6 +296,7 @@ async function createFaculty(req, res, next) {
         department: dept,
         email: email ? email.trim() : undefined,
         phone: phone ? phone.trim() : null,
+        dateOfBirth: dateOfBirth ? new Date(dateOfBirth) : null,
         roles: roles && roles.length > 0 ? roles : ['FACULTY'],
       });
 
