@@ -219,10 +219,11 @@ export function deriveAutomaticCourseRows({
       code
     );
 
-    const requiredPeriods =
+    const calculatedPeriods =
       crs.totalPeriod ||
-      (Number(crs.L || 0) + Number(crs.T || 0) + Number(crs.P || 0)) ||
-      (crs.isLab ? 4 : 3);
+      (Number(crs.L || 0) + Number(crs.T || 0) + Number(crs.P || 0));
+    const requiredPeriods = calculatedPeriods || 0;
+    const requirementSource = calculatedPeriods ? 'CURRICULUM' : 'MISSING';
 
     rows.push({
       id: `${code}_${academicContextId || 'ctx'}`,
@@ -233,6 +234,7 @@ export function deriveAutomaticCourseRows({
       facultyName: facultyResolution.facultyName,
       type: crs.courseType || (crs.isLab ? 'LAB' : 'THEORY'),
       requiredPeriods,
+      requirementSource,
       status: facultyResolution.status,
       isAllocated: facultyResolution.allocated,
       isElectiveSlot: false,
@@ -267,10 +269,11 @@ export function deriveAutomaticCourseRows({
       seenCourseCodes.add(code);
       const title = catalogMatch?.courseName || alloc.courseName || code;
       const type = catalogMatch?.courseType || alloc.allocationType || 'THEORY';
-      const periods =
+      const calculatedPeriods =
         catalogMatch?.totalPeriod ||
-        (Number(catalogMatch?.L || 0) + Number(catalogMatch?.T || 0) + Number(catalogMatch?.P || 0)) ||
-        3;
+        (Number(catalogMatch?.L || 0) + Number(catalogMatch?.T || 0) + Number(catalogMatch?.P || 0));
+      const periods = calculatedPeriods || 0;
+      const requirementSource = calculatedPeriods ? 'CURRICULUM' : 'MISSING';
 
       const facultyResolution = resolveAuthoritativeHODFaculty(
         hodAllocations,
@@ -287,6 +290,7 @@ export function deriveAutomaticCourseRows({
         facultyName: facultyResolution.facultyName,
         type,
         requiredPeriods: periods,
+        requirementSource,
         status: facultyResolution.status,
         isAllocated: facultyResolution.allocated,
         isElectiveSlot: false,
@@ -317,7 +321,8 @@ export function deriveAutomaticCourseRows({
       facultyId: null,
       facultyName: null,
       type: 'THEORY',
-      requiredPeriods: 3,
+      requiredPeriods: 0,
+      requirementSource: 'MISSING',
       status: 'REQUIRES HOD DECISION',
       isAllocated: false,
       isElectiveSlot: true,

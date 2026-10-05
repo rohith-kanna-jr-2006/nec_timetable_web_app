@@ -16,8 +16,8 @@ export default function LoginPage() {
 
   const isSessionExpired = searchParams.get('expired') === 'true';
 
-  const [email, setEmail] = useState('faculty@nec.edu.in');
-  const [password, setPassword] = useState('Password123!');
+  const [email, setEmail] = useState(process.env.NODE_ENV !== 'production' ? 'faculty@nec.edu.in' : '');
+  const [password, setPassword] = useState(process.env.NODE_ENV !== 'production' ? 'Password123!' : '');
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState(
@@ -68,46 +68,61 @@ export default function LoginPage() {
         </p>
       </div>
 
-      {/* Role Quick Preset Selector for Testing */}
-      <div style={{ marginBottom: '20px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
-          <label className="ui-label" style={{ margin: 0 }}>
-            Quick Account Credentials
-          </label>
-          <span className="text-xs text-muted">Click to autofill</span>
+      {/* Role Quick Preset Selector for Testing (non-production only) */}
+      {process.env.NODE_ENV !== 'production' && (
+        <div style={{ marginBottom: '20px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+            <label className="ui-label" style={{ margin: 0 }}>
+              Quick Account Credentials (Dev)
+            </label>
+            <span className="text-xs text-muted">Click to autofill</span>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 6 }}>
+            <button
+              type="button"
+              className={`btn ${email === 'faculty@nec.edu.in' ? 'btn-primary' : 'btn-outline'} btn-sm`}
+              style={{ fontSize: '0.75rem', padding: '6px 2px' }}
+              onClick={() => handleRolePreset('faculty@nec.edu.in')}
+            >
+              Faculty
+            </button>
+            <button
+              type="button"
+              className={`btn ${email === 'tc@nec.edu.in' ? 'btn-secondary' : 'btn-outline'} btn-sm`}
+              style={{
+                fontSize: '0.75rem',
+                padding: '6px 2px',
+                backgroundColor: email === 'tc@nec.edu.in' ? 'var(--color-primary-container)' : undefined,
+                fontWeight: 600,
+              }}
+              onClick={() => handleRolePreset('tc@nec.edu.in')}
+            >
+              TC
+            </button>
+            <button
+              type="button"
+              className={`btn ${email === 'ac@nec.edu.in' ? 'btn-secondary' : 'btn-outline'} btn-sm`}
+              style={{ fontSize: '0.75rem', padding: '6px 2px' }}
+              onClick={() => handleRolePreset('ac@nec.edu.in')}
+            >
+              Coord (AC)
+            </button>
+            <button
+              type="button"
+              className={`btn ${email === 'hod@nec.edu.in' ? 'btn-primary' : 'btn-outline'} btn-sm`}
+              style={{
+                fontSize: '0.75rem',
+                padding: '6px 2px',
+                backgroundColor: email === 'hod@nec.edu.in' ? 'var(--color-primary-container)' : undefined,
+                borderColor: email === 'hod@nec.edu.in' ? 'var(--color-secondary)' : undefined,
+              }}
+              onClick={() => handleRolePreset('hod@nec.edu.in')}
+            >
+              HOD
+            </button>
+          </div>
         </div>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
-          <button
-            type="button"
-            className={`btn ${email === 'faculty@nec.edu.in' ? 'btn-primary' : 'btn-outline'} btn-sm`}
-            style={{ fontSize: '0.75rem', padding: '6px 4px' }}
-            onClick={() => handleRolePreset('faculty@nec.edu.in')}
-          >
-            Faculty
-          </button>
-          <button
-            type="button"
-            className={`btn ${email === 'ac@nec.edu.in' ? 'btn-secondary' : 'btn-outline'} btn-sm`}
-            style={{ fontSize: '0.75rem', padding: '6px 4px' }}
-            onClick={() => handleRolePreset('ac@nec.edu.in')}
-          >
-            Coord
-          </button>
-          <button
-            type="button"
-            className={`btn ${email === 'hod@nec.edu.in' ? 'btn-primary' : 'btn-outline'} btn-sm`}
-            style={{
-              fontSize: '0.75rem',
-              padding: '6px 4px',
-              backgroundColor: email === 'hod@nec.edu.in' ? 'var(--color-primary-container)' : undefined,
-              borderColor: email === 'hod@nec.edu.in' ? 'var(--color-secondary)' : undefined,
-            }}
-            onClick={() => handleRolePreset('hod@nec.edu.in')}
-          >
-            HOD
-          </button>
-        </div>
-      </div>
+      )}
 
       {/* Error / Alert Banner */}
       {errorMessage && (

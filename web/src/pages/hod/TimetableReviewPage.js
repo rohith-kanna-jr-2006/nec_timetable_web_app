@@ -1,13 +1,15 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { getAcademicContexts } from '../../services/academicContextService';
 import {
   getClassTimetable,
   getTimetableVersions,
+  getReviewMatrix,
   groupSessionsByDay,
+  getSessionFacultyList,
   calculateTimetableMetrics,
 } from '../../services/timetableService';
-import { transitionTimetableVersion } from '../../services/hodAllocationService';
+import { submitTimetableForApproval } from '../../services/coordinatorService';
 import { useToast } from '../../context/ToastContext';
 import { WEEK_DAYS, PERIOD_TIMINGS } from '../../constants/schedule';
 import PageHeader from '../../components/common/PageHeader';
@@ -19,7 +21,7 @@ import ErrorState from '../../components/common/ErrorState';
 import EmptyState from '../../components/common/EmptyState';
 
 // TC Role name constant
-const TC_ROLE_NAME = 'TimeTable Coordinator';
+const TC_ROLE_NAME = 'TimeTable Coordinator (TC)';
 
 // ─── Session Cell Component ────────────────────────────────────────────────────
 function SessionCell({ session }) {
@@ -35,6 +37,7 @@ function SessionCell({ session }) {
   const bgColor = isLab ? 'rgba(234, 179, 8, 0.07)' : 'rgba(37, 99, 235, 0.05)';
   const borderColor = isLab ? 'rgba(234, 179, 8, 0.22)' : 'rgba(37, 99, 235, 0.18)';
   const accentColor = isLab ? 'var(--color-warning)' : 'var(--color-primary)';
+  const facultyList = getSessionFacultyList(session);
 
   return (
     <td style={{ padding: '6px 4px', backgroundColor: bgColor }}>
@@ -61,9 +64,36 @@ function SessionCell({ session }) {
         <div style={{ fontSize: '0.65rem', color: 'var(--color-on-surface-variant)', marginTop: 'auto', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           📍 {session.room || 'TBD'}
         </div>
-        {/* Faculty */}
-        <div style={{ fontSize: '0.65rem', color: 'var(--color-on-surface-variant)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-          👤 {session.facultyName ? `${session.facultyName} (${session.facultyId})` : (session.facultyId || 'Unassigned')}
+        {/* Faculty Assignments (all displayed in single cell, no duplicate cells) */}
+        <div style={{ fontSize: '0.65rem', color: 'var(--color-on-surface-variant)', display: 'flex', flexDirection: 'column', gap: '2px', marginTop: '2px' }}>
+          {facultyList.length > 0 ? (
+            facultyList.map((fa, faIdx) => (
+              <div
+                key={faIdx}
+                style={{ display: 'flex', alignItems: 'center', gap: '3px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}
+                title={`${fa.facultyName || fa.facultyId} (${fa.role || 'PRIMARY'})`}
+              >
+                <span style={{ fontSize: '0.6rem' }}>👤</span>
+                <span style={{ fontWeight: 600 }}>{fa.facultyName || fa.facultyId}</span>
+                {fa.role && fa.role !== 'PRIMARY' && (
+                  <span style={{
+                    fontSize: '0.55rem',
+                    padding: '1px 3px',
+                    borderRadius: '2px',
+                    backgroundColor: 'var(--color-surface-container-high)',
+                    color: 'var(--color-outline)',
+                    fontWeight: 700,
+                  }}>
+                    {fa.role}
+                  </span>
+                )}
+              </div>
+            ))
+          ) : (
+            <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              👤 Unassigned
+            </div>
+          )}
         </div>
       </div>
     </td>
@@ -77,6 +107,7 @@ export default function TimetableReviewPage({ portalType = 'HOD' }) {
   const paramClassId = searchParams.get('classId');
 
   const navigate = useNavigate();
+  const { showToast } = useToast();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [contexts, setContexts] = useState([]);
@@ -85,9 +116,8 @@ export default function TimetableReviewPage({ portalType = 'HOD' }) {
   const [selectedVersionId, setSelectedVersionId] = useState(paramVersionId || '');
   const [selectedClassId, setSelectedClassId] = useState(paramClassId || '');
   const [sessions, setSessions] = useState([]);
-  const [tcUser, setTcUser] = useState(null);
-  const [submitting, setSubmitting] = useState(false);
-  const { showToast } = useToast();
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [reviewSummary, setReviewSummary] = useState(null);
 
   // Load available academic contexts
   useEffect(() => {
@@ -98,7 +128,6 @@ export default function TimetableReviewPage({ portalType = 'HOD' }) {
         setContexts(list);
 
         if (list.length > 0) {
-          // If query param matches an existing context, retain it; otherwise select default
           if (paramContextId && list.some((c) => (c._id || c.id) === paramContextId)) {
             setSelectedContextId(paramContextId);
           } else if (!selectedContextId) {
@@ -113,23 +142,27 @@ export default function TimetableReviewPage({ portalType = 'HOD' }) {
     loadContexts();
   }, [paramContextId]);
 
-  // Load available timetable versions
-  useEffect(() => {
-    async function loadVersions() {
-      try {
-        const res = await getTimetableVersions();
-        const list = Array.isArray(res) ? res : res?.data || [];
-        setVersions(list);
+  // Load available timetable versions scoped by academic context
+  const loadVersions = useCallback(async () => {
+    try {
+      const params = selectedContextId ? { academicContextId: selectedContextId } : {};
+      const res = await getTimetableVersions(params);
+      const list = Array.isArray(res) ? res : res?.data || [];
+      setVersions(list);
 
-        if (paramVersionId && list.some((v) => (v._id || v.id) === paramVersionId)) {
-          setSelectedVersionId(paramVersionId);
-        }
-      } catch (err) {
-        console.warn('[TimetableReviewPage] Could not load timetable versions:', err);
+      if (paramVersionId && list.some((v) => (v._id || v.id) === paramVersionId)) {
+        setSelectedVersionId(paramVersionId);
+      } else if (list.length > 0 && !selectedVersionId) {
+        setSelectedVersionId(list[0]._id || list[0].id);
       }
+    } catch (err) {
+      console.warn('[TimetableReviewPage] Could not load timetable versions:', err);
     }
+  }, [selectedContextId, paramVersionId, selectedVersionId]);
+
+  useEffect(() => {
     loadVersions();
-  }, [paramVersionId]);
+  }, [selectedContextId]);
 
   // Sync state changes with URL query parameters
   const updateFilterParams = useCallback(
@@ -145,7 +178,8 @@ export default function TimetableReviewPage({ portalType = 'HOD' }) {
   const handleContextChange = (ctxId) => {
     setSelectedContextId(ctxId);
     setSessions([]);
-    updateFilterParams(ctxId, selectedVersionId);
+    setSelectedVersionId('');
+    updateFilterParams(ctxId, '');
   };
 
   const handleVersionChange = (verId) => {
@@ -154,35 +188,80 @@ export default function TimetableReviewPage({ portalType = 'HOD' }) {
     updateFilterParams(selectedContextId, verId);
   };
 
-  // Fetch schedule whenever selected cohort or version changes
-  const loadSchedule = useCallback(async () => {
-    if (!selectedContextId) return;
-    try {
-      setLoading(true);
-      setError(null);
-      const res = await getClassTimetable(selectedContextId, selectedVersionId || null);
-      const sessionList = res?.sessions || res?.data?.sessions || [];
-      setSessions(sessionList);
-    } catch (err) {
-      console.error('[TimetableReviewPage] Failed to fetch schedule:', err);
-      setError(err.message || 'Unable to load class timetable.');
-      setSessions([]);
-    } finally {
-      setLoading(false);
+  // Fetch schedule with stale-request prevention
+  useEffect(() => {
+    let isCancelled = false;
+
+    async function fetchTimetable() {
+      if (!selectedContextId) return;
+      try {
+        setLoading(true);
+        setError(null);
+        // Clear previous sessions immediately to prevent cross-context flicker
+        setSessions([]);
+
+        const [res, matrixRes] = await Promise.all([
+          getClassTimetable(selectedContextId, selectedVersionId || null),
+          getReviewMatrix({ academicContextId: selectedContextId, ...(selectedVersionId ? { versionId: selectedVersionId } : {}) }).catch(() => null),
+        ]);
+
+        if (!isCancelled) {
+          const sessionList = res?.sessions || res?.data?.sessions || [];
+          setSessions(sessionList);
+          if (matrixRes && matrixRes.summary) {
+            setReviewSummary(matrixRes.summary);
+          }
+        }
+      } catch (err) {
+        if (!isCancelled) {
+          console.error('[TimetableReviewPage] Failed to fetch schedule:', err);
+          setError(err.message || 'Unable to load class timetable.');
+          setSessions([]);
+        }
+      } finally {
+        if (!isCancelled) {
+          setLoading(false);
+        }
+      }
     }
+
+    fetchTimetable();
+
+    return () => {
+      isCancelled = true;
+    };
   }, [selectedContextId, selectedVersionId]);
 
-  useEffect(() => {
-    if (selectedContextId) {
-      loadSchedule();
+  const handleSubmitForApproval = async () => {
+    const targetVerId = selectedVersionId || (versions[0]?._id || versions[0]?.id);
+    if (!targetVerId) {
+      showToast('Please select a timetable version to submit for approval.', 'warning');
+      return;
     }
-  }, [selectedContextId, selectedVersionId]);
+
+    try {
+      setIsSubmitting(true);
+      await submitTimetableForApproval(targetVerId);
+      showToast('Timetable successfully submitted for HOD approval!', 'success');
+      await loadVersions();
+    } catch (err) {
+      console.error('[TimetableReviewPage] Submit for approval failed:', err);
+      showToast(err.message || 'Failed to submit timetable for HOD approval.', 'error');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
 
   const activeCtx = contexts.find((c) => (c._id || c.id) === selectedContextId);
-  const activeVer = versions.find((v) => (v._id || v.id) === selectedVersionId);
+  const activeVer = versions.find((v) => (v._id || v.id) === selectedVersionId) || versions[0];
   const grouped = groupSessionsByDay(sessions);
   const metrics = calculateTimetableMetrics(sessions);
   const periods = ['P1', 'P2', 'P3', 'P4', 'P5', 'P6', 'P7'];
+
+  const displayDays = [...WEEK_DAYS];
+  if (grouped.SAT && grouped.SAT.length > 0) {
+    displayDays.push({ id: 'SAT', label: 'Sat', full: 'Saturday' });
+  }
 
   const isCoordinator = portalType === 'Coordinator';
   const isHOD = portalType === 'HOD';
@@ -206,24 +285,6 @@ export default function TimetableReviewPage({ portalType = 'HOD' }) {
     : [
         { label: 'Timetable Review' },
       ];
-
-  const handleSubmitToHOD = async () => {
-    if (!activeVer || !activeVer._id) return;
-    try {
-      setSubmitting(true);
-      await transitionTimetableVersion(activeVer._id || activeVer.id, 'PENDING_HOD_APPROVAL');
-      showToast('Timetable submitted to HOD successfully.', 'success');
-      // Reload versions to reflect status update
-      const res = await getTimetableVersions();
-      const list = Array.isArray(res) ? res : res?.data || [];
-      setVersions(list);
-    } catch (err) {
-      console.error('[TimetableReviewPage] Submit to HOD failed:', err);
-      showToast(err.message || 'Failed to submit timetable to HOD.', 'error');
-    } finally {
-      setSubmitting(false);
-    }
-  };
 
   return (
     <div>
@@ -297,10 +358,34 @@ export default function TimetableReviewPage({ portalType = 'HOD' }) {
               </div>
             )}
 
+            {isCoordinator && (
+              <>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  icon="⚡"
+                  onClick={() => navigate(`/coordinator/design?academicContextId=${selectedContextId}`)}
+                >
+                  Timetable Design
+                </Button>
+                {activeVer && (activeVer.status === 'GENERATED' || activeVer.status === 'DRAFT' || activeVer.status === 'REJECTED') && (
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    icon="📨"
+                    isLoading={isSubmitting}
+                    onClick={handleSubmitForApproval}
+                  >
+                    Submit to HOD
+                  </Button>
+                )}
+              </>
+            )}
+
             <Button variant="outline" size="sm" icon="🖨️" onClick={() => window.print()}>
               Print Grid
             </Button>
-            <Button variant="primary" size="sm" icon="🔄" onClick={loadSchedule}>
+            <Button variant="primary" size="sm" icon="🔄" onClick={() => loadVersions()}>
               Refresh
             </Button>
           </div>
@@ -322,7 +407,16 @@ export default function TimetableReviewPage({ portalType = 'HOD' }) {
           </div>
           <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
             <Badge variant="secondary">Total Scheduled: {sessions.length} Periods</Badge>
-            {activeVer && <Badge variant="neutral">Version: {activeVer.versionLabel || activeVer._id}</Badge>}
+            {activeVer && (
+              <Badge variant={activeVer.status === 'PUBLISHED' ? 'success' : activeVer.status === 'APPROVED' ? 'primary' : activeVer.status === 'PENDING_HOD_APPROVAL' ? 'warning' : 'neutral'}>
+                {activeVer.status || 'DRAFT'} ({activeVer.versionLabel || activeVer._id})
+              </Badge>
+            )}
+            {reviewSummary && (
+              <Badge variant="secondary">
+                Matrix Sessions: {reviewSummary.sessionCount || reviewSummary.totalSessions || sessions.length}
+              </Badge>
+            )}
             {metrics.hardConflicts > 0 ? (
               <Badge variant="error">{metrics.hardConflicts} Conflicts</Badge>
             ) : (
@@ -330,40 +424,6 @@ export default function TimetableReviewPage({ portalType = 'HOD' }) {
             )}
           </div>
         </div>
-
-        {isCoordinator && activeVer && (
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: '16px', padding: '12px 16px', backgroundColor: 'var(--color-surface)', borderRadius: 'var(--radius-md)', border: '1px solid var(--color-border-subtle)' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-              <span style={{ fontSize: '0.875rem', fontWeight: 600, color: 'var(--color-on-surface)' }}>Coordinator Actions:</span>
-              {activeVer.status === 'GENERATED' && <Badge variant="warning">Generated — Awaiting TC Submission</Badge>}
-              {activeVer.status === 'PENDING_HOD_APPROVAL' && <Badge variant="primary">Pending HOD Approval</Badge>}
-              {activeVer.status === 'APPROVED' && <Badge variant="success">Approved</Badge>}
-              {activeVer.status === 'REJECTED' && (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                  <Badge variant="danger">Rejected</Badge>
-                  {activeVer.rejectionReason && (
-                    <span style={{ fontSize: '0.75rem', color: 'var(--color-error)' }}>
-                      Remarks: {activeVer.rejectionReason}
-                    </span>
-                  )}
-                </div>
-              )}
-              {activeVer.status === 'PUBLISHED' && <Badge variant="success">Published</Badge>}
-            </div>
-            <div>
-              {activeVer.status === 'GENERATED' && (
-                <Button
-                  variant="primary"
-                  size="sm"
-                  onClick={handleSubmitToHOD}
-                  disabled={submitting}
-                >
-                  {submitting ? 'Submitting...' : 'Submit to HOD'}
-                </Button>
-              )}
-            </div>
-          </div>
-        )}
       </Card>
 
       {/* Grid Card */}
@@ -377,7 +437,7 @@ export default function TimetableReviewPage({ portalType = 'HOD' }) {
           </div>
         ) : error ? (
           <div style={{ padding: '24px' }}>
-            <ErrorState message={error} onRetry={loadSchedule} />
+            <ErrorState message={error} onRetry={() => loadVersions()} />
           </div>
         ) : sessions.length === 0 ? (
           <div style={{ padding: '32px' }}>
@@ -419,7 +479,7 @@ export default function TimetableReviewPage({ portalType = 'HOD' }) {
                 </tr>
               </thead>
               <tbody>
-                {WEEK_DAYS.map((day) => {
+                {displayDays.map((day) => {
                   const daySessions = grouped[day.id] || [];
                   const sessionMap = {};
                   daySessions.forEach((s) => {

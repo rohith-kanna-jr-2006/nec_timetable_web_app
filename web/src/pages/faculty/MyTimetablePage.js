@@ -30,7 +30,7 @@ export default function MyTimetablePage() {
   const [selectedDay, setSelectedDay] = useState(() => getCurrentDayId());
   const [currentPeriod, setCurrentPeriod] = useState(() => getCurrentPeriodStatus());
 
-  const [activeFacultyId, setActiveFacultyId] = useState(user?.facultyId || user?.id || '');
+  const [activeFacultyId, setActiveFacultyId] = useState(user?.facultyId || '');
   const [activeFacultyName, setActiveFacultyName] = useState(user?.name || user?.facultyName || 'Faculty Member');
   const [allFaculty, setAllFaculty] = useState([]);
 
@@ -61,6 +61,11 @@ export default function MyTimetablePage() {
   }, []);
 
   const fetchSchedule = useCallback(async () => {
+    if (!activeFacultyId) {
+      setError('Your account is not linked to a faculty record. Please contact the Head of Department.');
+      setIsLoading(false);
+      return;
+    }
     setIsLoading(true);
     setError(null);
     try {
@@ -173,6 +178,11 @@ export default function MyTimetablePage() {
                   <span>🏫 {session.allocation || (session.academicContextId?.year ? `${session.academicContextId.year} CSE '${session.academicContextId.section}'` : "UG III Year A")}</span>
                   <span>📍 {session.room || 'LH-101'}</span>
                   {session.duration > 1 && <span>⏱️ Span: {session.duration} Periods</span>}
+                  {Array.isArray(session.facultyAssignments) && session.facultyAssignments.length > 1 && (
+                    <span title={session.facultyAssignments.map((f) => `${f.facultyName || f.facultyId} (${f.role})`).join(', ')}>
+                      👥 Team: {session.facultyAssignments.map((f) => f.facultyName || f.facultyId).join(', ')}
+                    </span>
+                  )}
                 </div>
               </div>
 

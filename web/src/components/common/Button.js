@@ -22,6 +22,7 @@ export default function Button({
       type={type}
       className={`btn ${variantClass} ${sizeClass} ${className}`}
       disabled={disabled || isLoading}
+      aria-busy={isLoading ? 'true' : undefined}
       onClick={onClick}
       {...props}
     >

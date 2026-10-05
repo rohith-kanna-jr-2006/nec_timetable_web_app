@@ -25,7 +25,7 @@ export default function FacultyAbsencePage() {
   const [reason, setReason] = useState('');
   const [formError, setFormError] = useState('');
 
-  const facultyId = user?.facultyId || 'FWL-03';
+  const facultyId = user?.facultyId;
 
   const loadAbsences = async () => {
     try {

@@ -26,7 +26,7 @@ export default function FacultyDashboard() {
   const [workload, setWorkload] = useState(null);
   const [unreadAlerts, setUnreadAlerts] = useState(0);
 
-  const facultyId = user?.facultyId || 'FWL-03';
+  const facultyId = user?.facultyId || null;
   const facultyName = user?.name || 'Faculty Member';
   const todayId = getCurrentDayId();
   const currentPeriod = getCurrentPeriodStatus();
@@ -35,6 +35,10 @@ export default function FacultyDashboard() {
     let isMounted = true;
 
     async function loadDashboardData() {
+      if (!facultyId) {
+        if (isMounted) setIsLoading(false);
+        return;
+      }
       setIsLoading(true);
       try {
         const [ttRes, wlRes, notifRes] = await Promise.allSettled([

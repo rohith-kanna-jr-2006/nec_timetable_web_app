@@ -44,7 +44,7 @@ export default function HODProfilePage() {
           { label: 'HOD Portal', path: '/hod/dashboard' },
           { label: 'Executive Profile' },
         ]}
-        badge={<Badge variant="warning">HOD EXECUTIVE (L1)</Badge>}
+        badge={<Badge variant="warning">Head of Department (HOD)</Badge>}
       />
 
       {loading ? (
@@ -109,7 +109,7 @@ export default function HODProfilePage() {
 
               <div style={{ display: 'flex', justifyContent: 'space-between', paddingBottom: '8px', borderBottom: '1px solid var(--color-surface-container)' }}>
                 <span style={{ color: 'var(--color-on-surface-variant)', fontWeight: 500 }}>Governance Authority:</span>
-                <Badge variant="warning">Executive Level 1 (HOD)</Badge>
+                <Badge variant="warning">Head of Department (HOD)</Badge>
               </div>
 
               <div style={{ display: 'flex', justifyContent: 'space-between', paddingBottom: '8px', borderBottom: '1px solid var(--color-surface-container)' }}>

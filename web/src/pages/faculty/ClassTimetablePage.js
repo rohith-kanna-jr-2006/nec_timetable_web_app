@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
-import { getClassTimetable } from '../../services/timetableService';
+import { getClassTimetable, getPublishedClassTimetable, getSessionFacultyList } from '../../services/timetableService';
 import { getAcademicContexts } from '../../services/academicContextService';
 import PageHeader from '../../components/common/PageHeader';
 import Card from '../../components/common/Card';
@@ -30,6 +30,9 @@ export default function ClassTimetablePage() {
   const [selectedContextId, setSelectedContextId] = useState(queryContextId || '');
   const [timetableMatrix, setTimetableMatrix] = useState({});
   const [totalSessions, setTotalSessions] = useState(0);
+  const [isPublished, setIsPublished] = useState(true);
+  const [publishMessage, setPublishMessage] = useState(null);
+  const [gridDays, setGridDays] = useState(WEEK_DAYS);
 
   // Filter only regular academic periods (excluding standalone breaks)
   const academicPeriods = PERIOD_TIMINGS.filter((p) => Boolean(p.period));
@@ -61,21 +64,39 @@ export default function ClassTimetablePage() {
     initContexts();
   }, [queryContextId]);
 
-  // Load timetable matrix when selected cohort changes
+  // Load timetable matrix when selected cohort changes (stale response safe)
   useEffect(() => {
+    let isCancelled = false;
     if (!selectedContextId) return;
 
     async function loadSchedule() {
       try {
         setLoading(true);
         setError(null);
-        const res = await getClassTimetable(selectedContextId);
-        const sessions = res?.sessions || res?.data?.sessions || [];
+        setTimetableMatrix({});
+        setTotalSessions(0);
+
+        // FE-P1-010: Use published-only endpoint for student/faculty class perspective
+        const res = await getPublishedClassTimetable(selectedContextId);
+        if (isCancelled) return;
+
+        const published = res?.isPublished !== false;
+        setIsPublished(published);
+        setPublishMessage(res?.message || (published ? null : 'Timetable has not yet been published for this cohort.'));
+
+        const sessions = published ? (res?.sessions || res?.data?.sessions || []) : [];
         setTotalSessions(sessions.length);
 
         // Build 2D matrix: [dayId][periodCode] -> session
         const matrix = {};
-        WEEK_DAYS.forEach((d) => {
+        const daysToInclude = [...WEEK_DAYS];
+        const hasSat = sessions.some((s) => (s.day || '').toUpperCase() === 'SAT');
+        if (hasSat) {
+          daysToInclude.push({ id: 'SAT', label: 'Sat', full: 'Saturday' });
+        }
+        setGridDays(daysToInclude);
+
+        daysToInclude.forEach((d) => {
           matrix[d.id] = {};
         });
 
@@ -89,15 +110,23 @@ export default function ClassTimetablePage() {
 
         setTimetableMatrix(matrix);
       } catch (err) {
-        console.error('[ClassTimetablePage] Failed to load schedule:', err);
-        setError(err.message || 'Unable to retrieve class schedule matrix.');
-        setTimetableMatrix({});
+        if (!isCancelled) {
+          console.error('[ClassTimetablePage] Failed to load schedule:', err);
+          setError(err.message || 'Unable to retrieve class schedule matrix.');
+          setTimetableMatrix({});
+          setTotalSessions(0);
+        }
       } finally {
-        setLoading(false);
+        if (!isCancelled) {
+          setLoading(false);
+        }
       }
     }
 
     loadSchedule();
+    return () => {
+      isCancelled = true;
+    };
   }, [selectedContextId]);
 
   const activeContext = contexts.find((c) => (c._id || c.id) === selectedContextId);
@@ -119,16 +148,17 @@ export default function ClassTimetablePage() {
     <div>
       <PageHeader
         title="Class Timetable"
-        description="Class-centric schedule perspective: viewing complete weekly period allocations for the class cohort associated through Class Advisor assignment."
+        description="Official published schedule: viewing complete weekly period allocations for the selected class cohort."
         breadcrumbs={[
           { label: 'Faculty Portal', path: '/faculty/dashboard' },
           { label: 'Class Timetable' },
         ]}
-        badge={<Badge variant="primary">CLASS PERSPECTIVE</Badge>}
+        badge={<Badge variant={isPublished ? 'success' : 'warning'}>{isPublished ? 'PUBLISHED' : 'UNPUBLISHED'}</Badge>}
         actions={
           <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
-            <span style={{ fontSize: '0.8125rem', fontWeight: 600, color: 'var(--color-outline)' }}>Class Cohort:</span>
             <Select
+              id="class-cohort-select"
+              label="Class Cohort"
               value={selectedContextId}
               onChange={handleContextChange}
               options={contexts.map((c) => ({
@@ -177,6 +207,13 @@ export default function ClassTimetablePage() {
             <EmptyState
               title="No academic cohorts configured"
               description="Contact the Head of Department to initialize academic cohorts."
+            />
+          </div>
+        ) : !isPublished || totalSessions === 0 ? (
+          <div style={{ padding: '32px' }}>
+            <EmptyState
+              title={!isPublished ? 'Timetable Not Published' : 'No scheduled sessions'}
+              description={publishMessage || 'No published sessions are currently mapped for this class cohort.'}
             />
           </div>
         ) : (
@@ -234,7 +271,7 @@ export default function ClassTimetablePage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {WEEK_DAYS.map((d) => (
+                  {gridDays.map((d) => (
                     <tr key={d.id} style={{ borderBottom: '1px solid var(--color-surface-container)' }}>
                       <td
                         style={{
@@ -250,6 +287,8 @@ export default function ClassTimetablePage() {
                       {academicPeriods.map((p) => {
                         const session = timetableMatrix[d.id]?.[p.period];
                         const isLab = session?.sessionType === 'LAB';
+                        const facultyList = getSessionFacultyList(session);
+
                         return (
                           <td
                             key={p.period}
@@ -288,9 +327,21 @@ export default function ClassTimetablePage() {
                                 >
                                   {session.courseName || session.title}
                                 </span>
-                                <span style={{ fontSize: '0.7rem', color: 'var(--color-outline)' }}>
-                                  Faculty: {session.facultyName || session.facultyId || 'Instructor'}
-                                </span>
+                                {/* All assigned faculty members rendered in single cell */}
+                                <div style={{ fontSize: '0.7rem', color: 'var(--color-outline)', display: 'flex', flexDirection: 'column', gap: '1px' }}>
+                                  {facultyList.length > 0 ? (
+                                    facultyList.map((fa, faIdx) => (
+                                      <span key={faIdx} title={`${fa.facultyName || fa.facultyId} (${fa.role || 'PRIMARY'})`} style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                        👤 {fa.facultyName || fa.facultyId}
+                                        {fa.role && fa.role !== 'PRIMARY' && (
+                                          <span style={{ fontSize: '0.6rem', marginLeft: '4px', opacity: 0.85, fontWeight: 600 }}>[{fa.role}]</span>
+                                        )}
+                                      </span>
+                                    ))
+                                  ) : (
+                                    <span>👤 Unassigned</span>
+                                  )}
+                                </div>
                                 {session.room && (
                                   <span style={{ fontSize: '0.6875rem', color: 'var(--color-on-surface-variant)' }}>
                                     Room: {session.room}

@@ -13,7 +13,11 @@ export default function Toast({ message, type = 'info', onClose }) {
   };
 
   return (
-    <div className={`ui-toast ui-toast-${type}`} role="alert">
+    <div
+      className={`ui-toast ui-toast-${type}`}
+      role={type === 'error' ? 'alert' : 'status'}
+      aria-live={type === 'error' ? 'assertive' : 'polite'}
+    >
       <span
         style={{
           width: 24,

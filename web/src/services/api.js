@@ -160,4 +160,36 @@ export const api = {
   getBaseUrl: () => API_BASE_URL,
 };
 
+/**
+ * Translate backend error codes into human-readable, actionable messages (FE-P2-015)
+ */
+export function describeError(error, fallback = 'An unexpected error occurred.') {
+  if (!error) return fallback;
+  const code = error.code || error.data?.code;
+  const message = error.message || error.data?.message;
+
+  switch (code) {
+    case 'TIMETABLE_VERSION_CONTEXT_MISMATCH':
+      return 'The requested timetable version belongs to a different academic context. Please refresh or select the appropriate cohort.';
+    case 'RATE_LIMIT_EXCEEDED':
+      return 'Too many timetable generation requests. Please wait a few minutes before trying again.';
+    case 'INVALID_COHORT_YEAR':
+      return 'The selected academic year or cohort is invalid for this curriculum context.';
+    case 'SESSION_NOT_FOUND':
+      return 'The specified timetable session was not found. It may have been rescheduled or removed.';
+    case 'ABSENCE_NOT_FOUND':
+      return 'The specified faculty absence record could not be found.';
+    case 'SESSION_REQUIRED':
+      return 'A valid timetable session must be selected to proceed.';
+    case 'FORBIDDEN':
+      return 'You do not have the required role or administrative authority to perform this action.';
+    case 'NOT_FOUND':
+      return message || 'The requested resource was not found.';
+    case 'NETWORK_ERROR':
+      return 'Unable to reach backend services. Please verify your network connection and server status.';
+    default:
+      return message || fallback;
+  }
+}
+
 export default api;
