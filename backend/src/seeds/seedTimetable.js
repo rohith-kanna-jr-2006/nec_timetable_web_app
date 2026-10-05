@@ -535,7 +535,13 @@ async function seedTimetable() {
       day: 'FRI',
       period: 'P5',
       room: 'LH-101',
-      sessionType: 'PBL',
+      // Co-curricular activity, classified like its 22CSS0x siblings
+      // (22CSS01 Library, 22CSS02 Sports). It is deliberately NOT 'PBL':
+      // this curriculum's Course master defines no PBL credit course, so
+      // 'PBL' would imply a credit-curriculum course that does not exist.
+      // 'OTHER' marks it as a non-credit institutional activity, which is
+      // what the integrity audit validates against the Course master.
+      sessionType: 'OTHER',
       duration: 1,
     },
     {

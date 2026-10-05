@@ -332,7 +332,9 @@ async function getAcademicContextWorkflowStatus(academicContextId) {
       program: context.program,
       status: context.status,
     },
-    regulation: 'R22',
+    // Phase 10: derived from the context's programme rather than hardcoded, so a
+    // PG cohort reports R22-PG instead of always claiming R22.
+    regulation: require('./electiveSelectionService').regulationForContext(context),
     year: context.year,
     semester: expectedSemester,
     section: context.section,

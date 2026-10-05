@@ -141,6 +141,7 @@ Retrieve active user session profile during page refresh or session restoration.
 | **Create Draft Allocation** | `POST /api/hod-allocations` | **403** | Allowed | Allowed | Allowed |
 | **Approve HOD Allocation** | `PATCH /api/hod-allocations/:id/status` | **403** | **403** | Allowed | Allowed |
 | **Assign Class Advisor** | `POST /api/class-advisors` | **403** | **403** | Allowed | Allowed |
+| **View Class Advisors** | `GET /api/class-advisors` | Allowed | Allowed | Allowed | Allowed |
 | **Create/Update Faculty** | `POST/PUT /api/faculty` | **403** | **403** | Allowed | Allowed |
 | **Delete Faculty Master** | `DELETE /api/faculty/:facultyId` | **403** | **403** | **403** | Allowed |
 
@@ -926,6 +927,114 @@ Submit and track faculty leave.
 
 ### `PATCH /api/absences/:id/status`
 HOD approval/rejection of leave.
+
+### `GET /api/class-advisors` & `POST /api/class-advisors`
+Assign a class advisor to an **exact AcademicContext**. Authorization: `HOD`, `ADMIN`. `TC` and `FACULTY` receive `403`; an unauthenticated call receives `401` (including on `GET`, which previously had no authentication).
+
+**Scoping (Phase 8).** The advisor is scoped by `academicContextId`, never by a display string such as `III-A` or `2026-27`. Because `2026-27 / III-A` and `2027-28 / III-A` are different AcademicContexts, both assignments can be active simultaneously and neither overwrites the other. Reassigning inside one context deactivates only that context's previous advisor; other academic years and `INACTIVE` history are preserved.
+
+Request body:
+
+| Field | Required | Notes |
+| --- | --- | --- |
+| `academicContextId` | Yes | Must be a valid ObjectId and must exist. |
+| `facultyId` | Yes | Must exist and be active. |
+
+At most one `ACTIVE` assignment per `academicContextId` (service check plus partial unique index `active_advisor_per_context_idx`).
+
+Structured errors:
+
+| Code | HTTP | Meaning |
+| --- | --- | --- |
+| `VALIDATION_ERROR` | 400 | Missing field, or `academicContextId` is not a valid ObjectId. |
+| `CONTEXT_NOT_FOUND` | 404 | The AcademicContext does not exist. |
+| `FACULTY_REQUIRED` | 400 | Missing `facultyId`. |
+| `FACULTY_NOT_FOUND` | 404 | Unknown faculty. |
+| `FACULTY_INACTIVE` | 409 | Faculty is inactive. |
+| `DUPLICATE_CLASS_ADVISOR` | 409 | A concurrent write produced a second active advisor. |
+
+### `POST /api/faculty` & `PUT /api/faculty/:facultyId` (Phase 9)
+
+**Creation.** `POST /api/faculty` additionally accepts `dateOfBirth`. When it is supplied, the backend derives the initial credential as `DDMMYYYY`, hashes it with `bcryptjs`, and stores **only the hash** on a linked `User` account (linked by `facultyId`). The plaintext credential is never persisted, logged, or returned. When `dateOfBirth` is omitted no account is created, preserving the previous workflow.
+
+`dateOfBirth` must be a real calendar date. Malformed values, impossible dates, and future dates are rejected. It is optional for legacy compatibility; no DOB is ever invented for an existing record.
+
+**Update whitelist.** `PUT /api/faculty/:facultyId` accepts **only**:
+
+`facultyName`, `email`, `dateOfBirth`, `designation`, `phone`
+
+Every other field is rejected with `PROTECTED_FIELD` (400), including `facultyId`, `role`, `roles`, `department`, `password`, `passwordHash`, `isActive`, `_id`, `createdAt`, `updatedAt`, workload totals, teaching allocations and responsibilities.
+
+| Code | HTTP | Meaning |
+| --- | --- | --- |
+| `PROTECTED_FIELD` | 400 | Body contained a protected or unknown field. `details.attempted` lists them, `details.allowed` lists the permitted fields. |
+| `NO_UPDATABLE_FIELDS` | 400 | Body contained no permitted field. |
+| `INVALID_DATE_OF_BIRTH` | 400 | `dateOfBirth` is not a real calendar date. |
+| `DUPLICATE_EMAIL` | 409 | Another faculty already uses that email. |
+
+This endpoint never writes a credential: an existing `User.passwordHash` is always preserved, and changing `dateOfBirth` does not reset a password. Changing `email` does not modify the linked login account.
+
+### Workload integrity (Phase 11)
+
+A course's weekly period requirement is authoritative in `Course.totalPeriod`, falling back to `Course.L + T + P`. When neither exists the requirement is reported as **missing** rather than defaulted.
+
+The TC design context now exposes `requiredPeriodsSource` (`TOTAL_PERIOD` | `LTP_SUM` | `LEGACY_FALLBACK`) and `requiredPeriodsAuthoritative` per course, so a curriculum gap is visible to the client.
+
+Session-count rules:
+
+- One `period` = one timetable slot.
+- A multi-faculty LAB or MC_SAS is **one class event per slot**; the class-session count is never multiplied by the number of assigned faculty.
+
+Workload figures are backend-authoritative. Supplying `calculatedTeachingHours`, `calculatedResponsibilityHours`, `calculatedTotalHours`, `teaching` or `responsibilities` from a client is rejected:
+
+| Code | HTTP | Meaning |
+| --- | --- | --- |
+| `WORKLOAD_FIELD_PROTECTED` | 400 | A backend-authoritative workload field was supplied by the client. `details.attempted` lists them. |
+
+`sourceTotalHours` remains accepted as reference data. The repository defines no workload multiplier distinguishing `PRIMARY` / `ADDITIONAL` / `OPTIONAL`, nor `MATHS_BME` / `ENGLISH` within `MC_SAS`; none is invented.
+
+### EO selection (Phase 10)
+
+EO selection is **HOD-authoritative** and scoped to an exact `academicContextId`. No new write endpoint was added: selection continues to happen through the existing `POST /api/hod-allocations`, which Phase 10 extends with regulation validation.
+
+**`GET /api/hod-allocations/elective-candidates`** (authenticated, read-only)
+
+Query: `academicContextId` (required), `regulation?`, `semester?`.
+
+Returns the EO catalog entries applicable to that cohort: `academicContextId`, `regulation`, `semester`, `slots`, `allowedElectiveTypes`, `candidateCount`, and `candidates[]` (`courseCode`, `courseName`, `regulation`, `catalogSemester`, `electiveType`, `vertical`, `isSlotEligible`, `isSelected`).
+
+**`GET /api/hod-allocations/elective-selection`** (authenticated, read-only)
+
+Query: `academicContextId` (required).
+
+Returns the HOD-authoritative active selection: `regulation`, `semester`, `requiredSlotsCount`, `slots`, `selectedCount`, `isComplete`, `state`, and `selected[]` (`courseCode`, `courseName`, `allocationId`, `status`, `assignedBy`, `facultyId`, timestamps). `state` is `ELECTIVE_SELECTION_COMPLETE` or `ELECTIVE_SELECTION_REQUIRED`.
+
+| Code | HTTP | Meaning |
+| --- | --- | --- |
+| `ACADEMIC_CONTEXT_REQUIRED` | 400 | `academicContextId` missing. |
+| `CONTEXT_NOT_FOUND` | 404 | Unknown academic context. |
+| `REGULATION_NOT_SUPPORTED` | 404 | Regulation is not represented in the course catalog. R17/R26 are never fabricated. |
+| `COURSE_NOT_FOUND` | 404 | Unknown course. |
+| `COURSE_NOT_ELECTIVE` | 409 | Course is not an EO course. |
+| `COURSE_INACTIVE` | 409 | Course is inactive. |
+| `ELECTIVE_COURSE_WRONG_REGULATION` | 409 | Course belongs to another regulation than the cohort. |
+| `ELECTIVE_COURSE_WRONG_SEMESTER` | 409 | Elective type is not permitted by the cohort's slots. |
+
+`POST /api/hod-allocations` now also returns `ELECTIVE_COURSE_WRONG_REGULATION` when an EO course from another regulation is selected for a cohort. Existing slot-type and duplicate checks (`COURSE_SEMESTER_MISMATCH`, `HOD_ALLOCATION_CONFLICT`) are unchanged.
+
+### Academic year range (Phase 8)
+
+`AcademicContext` exposes the canonical pair `academicYearFrom` / `academicYearTo` (integers, e.g. `2026` / `2027`). The legacy `academicYear` string (`'2026-27'`) is retained as a **derived compatibility mirror** and is never the source of truth.
+
+- `GET /api/academic-contexts` accepts `academicYearFrom` + `academicYearTo`, or the legacy `academicYear`. Both spellings select the same contexts.
+- `POST /api/academic-contexts` accepts the canonical pair or the legacy string.
+- `academicYearFrom < academicYearTo` is required; `from == to`, `from > to`, a missing side, and a non-canonical string are rejected.
+
+Errors: `INVALID_ACADEMIC_YEAR` (400, malformed or incomplete range), `DUPLICATE_CONTEXT` (409, identity already exists).
+
+Context identity is `academicYearFrom + academicYearTo + semester + department + year + section`.
+
+Migration: `node backend/src/migrations/migrateAcademicYearRange.js` — idempotent, non-destructive, preserves every `_id`, and reports unparseable records instead of guessing.
 
 ### `GET /api/substitutes` & `POST /api/substitutes`
 Assign substitute faculty to a scheduled timetable session without altering historical workload.

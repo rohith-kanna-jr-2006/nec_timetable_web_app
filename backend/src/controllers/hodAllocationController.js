@@ -561,6 +561,23 @@ async function createAllocation(req, res, next) {
       }
     }
 
+    // Phase 10: an EO selection must additionally belong to the regulation that
+    // applies to this cohort. Slot type was already checked above; this closes the
+    // remaining gap so a course from another regulation can never be activated.
+    if (['PEC', 'OEC', 'Management Elective'].includes(crs.electiveType || '') ||
+        ['PEC', 'OEC'].includes(crs.category)) {
+      const contextRegulation = regulationForContext(context);
+      if (String(crs.regulation || '').toUpperCase() !== String(contextRegulation).toUpperCase()) {
+        return errorResponse(
+          res,
+          `Elective '${normalizedCourseCode}' belongs to regulation ${crs.regulation}, but this cohort follows ${contextRegulation}.`,
+          409,
+          'ELECTIVE_COURSE_WRONG_REGULATION',
+          { courseCode: normalizedCourseCode, courseRegulation: crs.regulation, contextRegulation }
+        );
+      }
+    }
+
     // 3. Check policy & validate payload
     const policy = getCourseAllocationPolicy(crs);
     const existingAllocs = await HODFacultyAllocation.find({
@@ -784,6 +801,48 @@ async function deleteAllocation(req, res, next) {
   }
 }
 
+const {
+  listElectiveCandidates,
+  getActiveElectiveSelection,
+  regulationForContext,
+} = require('../services/electiveSelectionService');
+
+/**
+ * EO candidates applicable to an academic context (Phase 10).
+ * GET /api/hod-allocations/elective-candidates?academicContextId=&regulation=&semester=
+ *
+ * Read-only: TC and FACULTY may read, but only HOD/ADMIN can select (POST /).
+ */
+async function getElectiveCandidates(req, res, next) {
+  try {
+    const { academicContextId, regulation, semester } = req.query;
+    if (!academicContextId) {
+      return errorResponse(res, 'academicContextId is required', 400, 'ACADEMIC_CONTEXT_REQUIRED');
+    }
+    const data = await listElectiveCandidates({ academicContextId, regulation, semester });
+    return successResponse(res, data);
+  } catch (error) {
+    next(error);
+  }
+}
+
+/**
+ * The HOD-authoritative active elective selection for a context (Phase 10).
+ * GET /api/hod-allocations/elective-selection?academicContextId=
+ */
+async function getElectiveSelection(req, res, next) {
+  try {
+    const { academicContextId } = req.query;
+    if (!academicContextId) {
+      return errorResponse(res, 'academicContextId is required', 400, 'ACADEMIC_CONTEXT_REQUIRED');
+    }
+    const data = await getActiveElectiveSelection(academicContextId);
+    return successResponse(res, data);
+  } catch (error) {
+    next(error);
+  }
+}
+
 module.exports = {
   getAllocations,
   getAllocationContext,
@@ -793,6 +852,8 @@ module.exports = {
   updateAllocation,
   updateStatus,
   deleteAllocation,
+  getElectiveCandidates,
+  getElectiveSelection,
 };
 
 

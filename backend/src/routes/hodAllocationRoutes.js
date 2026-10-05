@@ -7,6 +7,10 @@ const { validate } = require('../middleware/validateMiddleware');
 const { validateHodAllocation } = require('../validators/allocationValidators');
 
 router.get('/', hodAllocationController.getAllocations);
+// Phase 10: EO candidate catalog + the HOD-authoritative active selection.
+// Registered before the '/:id' routes so they are not shadowed.
+router.get('/elective-candidates', authenticateUser, hodAllocationController.getElectiveCandidates);
+router.get('/elective-selection', authenticateUser, hodAllocationController.getElectiveSelection);
 router.get('/validate/:academicContextId', hodAllocationController.validateCohortAllocations);
 router.get('/context/:academicContextId', hodAllocationController.getAllocationContext);
 router.put(

@@ -73,7 +73,12 @@ async function seedWorkload() {
     };
   });
 
-  await FacultyWorkload.deleteMany({});
+  // Phase 12: reset ONLY the workload rows this seed owns (the master faculty
+  // list), never the whole collection. A global deleteMany({}) previously
+  // destroyed workload records belonging to anyone else, including fixtures
+  // created by other suites.
+  const managedFacultyIds = workloadDocs.map((d) => d.facultyId);
+  const removed = await FacultyWorkload.deleteMany({ facultyId: { $in: managedFacultyIds } });
   const inserted = await FacultyWorkload.insertMany(workloadDocs);
 
   // Verification of invariants

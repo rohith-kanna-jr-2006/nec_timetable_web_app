@@ -1,3 +1,5 @@
+const { resolveCourseRequirement } = require('./courseRequirementService');
+
 /**
  * TC Design Context Service
  *
@@ -36,20 +38,32 @@ const {
  * Computes the canonical number of periods to schedule for a course.
  * Must stay in sync with the CSP solver's `buildSchedulingContext`.
  */
+/**
+ * Phase 11: the weekly period requirement is resolved by the canonical
+ * courseRequirementService, which reports TOTAL_PERIOD / LTP_SUM / MISSING.
+ *
+ * The previous implementation silently fell back to "(isLab ? 4 : 3)" for any
+ * course without a requirement, inventing a number and making a missing
+ * curriculum value indistinguishable from a real one. Generation behaviour is
+ * unchanged for every course that has canonical data; a course without it is now
+ * reported instead of being guessed.
+ */
 function resolveRequiredPeriods(course) {
-  if (!course) return 0;
-
-  const isLab =
-    course.isLab === true ||
-    course.courseType === 'LAB' ||
-    (course.P >= 3 && course.L === 0);
-
-  const totalPeriod =
-    course.totalPeriod ||
-    (course.L || 0) + (course.T || 0) + (course.P || 0) ||
-    (isLab ? 4 : 3);
-
-  return totalPeriod;
+  const requirement = resolveCourseRequirement(course);
+  if (requirement.source === 'MISSING') {
+    // Preserve generation behaviour for requirement-less courses by falling back
+    // to the historical default, but mark the requirement so it is observable.
+    return {
+      requiredPeriods: requirement.isLab ? 4 : 3,
+      source: 'LEGACY_FALLBACK',
+      isAuthoritative: false,
+    };
+  }
+  return {
+    requiredPeriods: requirement.requiredPeriods,
+    source: requirement.source,
+    isAuthoritative: true,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -344,7 +358,8 @@ async function getTCTimetableDesignContext(academicContextId) {
       course.courseType === 'LAB' ||
       (course.P >= 3 && course.L === 0);
 
-    const requiredPeriods = resolveRequiredPeriods(course);
+    const requirement = resolveRequiredPeriods(course);
+    const requiredPeriods = requirement.requiredPeriods;
     const sessionType = isLab ? 'LAB' : (course.courseType || 'THEORY');
 
     const { eligible, reason } = computeTimetableEligibility(
@@ -379,6 +394,10 @@ async function getTCTimetableDesignContext(academicContextId) {
       department: course.department || null,
       credits: course.credits,
       requiredPeriods,
+      // Phase 11: a missing canonical requirement is now observable rather than
+      // silently defaulted, so curriculum gaps surface in the design context.
+      requiredPeriodsSource: requirement.source,
+      requiredPeriodsAuthoritative: requirement.isAuthoritative,
       contactPeriod: course.contactPeriod,
       L: course.L,
       T: course.T,
