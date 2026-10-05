@@ -14,6 +14,7 @@ export default function Sidebar({
 
   const getNavigationGroups = () => {
     switch (role) {
+      case 'TC':
       case 'AC':
         return [
           {
@@ -38,7 +39,7 @@ export default function Sidebar({
       case 'HOD':
         return [
           {
-            title: 'HOD EXECUTIVE',
+            title: 'DEPARTMENT GOVERNANCE',
             items: [
               { label: 'Dashboard', path: '/hod/dashboard', icon: '📊' },
               { label: 'Faculty Management', path: '/hod/faculty', icon: '👥' },
@@ -64,6 +65,8 @@ export default function Sidebar({
             items: [
               { label: 'Class Timetable', path: '/faculty/class-timetable', icon: '🏫' },
               { label: 'Faculty Timetable', path: '/faculty/faculty-timetable', icon: '🗓️' },
+              { label: 'My Timetable', path: '/faculty/my-timetable', icon: '👤' },
+              { label: 'Weekly Grid Matrix', path: '/faculty/weekly-timetable', icon: '📅' },
             ],
           },
           {
@@ -85,9 +88,10 @@ export default function Sidebar({
   const getRoleBadge = () => {
     switch (role) {
       case 'HOD':
-        return <Badge variant="warning">HOD EXECUTIVE (L1)</Badge>;
+        return <Badge variant="warning">Head of Department (HOD)</Badge>;
+      case 'TC':
       case 'AC':
-        return <Badge variant="secondary">TIME TABLE COORD (TC)</Badge>;
+        return <Badge variant="secondary">TimeTable Coordinator (TC)</Badge>;
       default:
         return <Badge variant="primary">FACULTY MEMBER</Badge>;
     }
@@ -100,7 +104,7 @@ export default function Sidebar({
       {/* Brand Header */}
       <div className="ui-sidebar-header">
         <NavLink
-          to={`/${role === 'HOD' ? 'hod' : role === 'AC' ? 'coordinator' : 'faculty'}/dashboard`}
+          to={`/${role === 'HOD' ? 'hod' : (role === 'AC' || role === 'TC') ? 'coordinator' : 'faculty'}/dashboard`}
           className="ui-sidebar-brand"
           onClick={onCloseMobile}
         >

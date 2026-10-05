@@ -60,15 +60,12 @@ export default function TheoryAllocationRow({
 
       <div className="ui-allocation-col">
         <Input
-          label="Hrs/Week"
+          label="Hrs/Week (Standard)"
           type="number"
-          min="0"
-          max="10"
-          step="1"
-          placeholder="3"
-          value={item.hours !== undefined && item.hours !== null ? item.hours : 3}
-          onChange={(e) => handleFieldChange('hours', e.target.value)}
-          error={error.hours}
+          readOnly
+          disabled
+          value={3}
+          helperText="3 hrs standard"
         />
       </div>
 

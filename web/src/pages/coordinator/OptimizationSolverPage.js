@@ -3,8 +3,9 @@ import { useNavigate } from 'react-router-dom';
 import { useToast } from '../../context/ToastContext';
 import { getAcademicContexts } from '../../services/academicContextService';
 import { getCourses } from '../../services/courseService';
-import { getHODAllocations } from '../../services/hodAllocationService';
-import { solveTimetable } from '../../services/timetableService';
+import { getHODAllocations, validateCohortAllocations } from '../../services/hodAllocationService';
+import { generateFromContext, getDesignContext, getContextStatus } from '../../services/timetableService';
+import { describeError } from '../../services/api';
 import {
   RELEVANT_YEARS,
   YEAR_SEMESTER_MAP,
@@ -156,16 +157,19 @@ export default function OptimizationSolverPage() {
       setSelectedSemester(validSems[0]);
     }
     setGenerationSummary(null);
+    setContextStatus(null);
   };
 
   const handleSemesterChange = (sem) => {
     setSelectedSemester(sem);
     setGenerationSummary(null);
+    setContextStatus(null);
   };
 
   const handleSectionChange = (sec) => {
     setSelectedSection(sec);
     setGenerationSummary(null);
+    setContextStatus(null);
   };
 
   // Derive Automatic Course Rows & Synchronized Assignment Plan
@@ -204,20 +208,94 @@ export default function OptimizationSolverPage() {
     );
   })();
 
+  // Authoritative Design Context, Validation, & Context Lifecycle Stores (FE-P1-007, FE-P1-009, FE-P1-008)
+  const [designContext, setDesignContext] = useState(null);
+  const [cohortValidation, setCohortValidation] = useState(null);
+  const [contextStatus, setContextStatus] = useState(null);
+  const [validationLoading, setValidationLoading] = useState(false);
+
+  // Authoritative Design Context, Validation, and Context Status fetch
+  const loadDesignAndValidation = useCallback(async (ctxId, isCancelledCheck = () => false) => {
+    if (!ctxId) {
+      setDesignContext(null);
+      setCohortValidation(null);
+      setContextStatus(null);
+      return;
+    }
+    // Immediately clear previous context lifecycle state to prevent cross-context bleed
+    setContextStatus(null);
+
+    try {
+      setValidationLoading(true);
+      const [designRes, valRes, statusRes] = await Promise.allSettled([
+        getDesignContext(ctxId),
+        validateCohortAllocations(ctxId),
+        getContextStatus(ctxId),
+      ]);
+
+      if (isCancelledCheck()) return;
+
+      if (designRes.status === 'fulfilled' && designRes.value) {
+        const dVal = designRes.value?.data || designRes.value;
+        setDesignContext(dVal);
+        if (dVal?.courses && Array.isArray(dVal.courses) && dVal.courses.length > 0) {
+          setCurrentSemesterCourses(dVal.courses);
+        }
+      }
+      if (valRes.status === 'fulfilled' && valRes.value) {
+        const vVal = valRes.value?.data || valRes.value;
+        setCohortValidation(vVal);
+      }
+      if (statusRes.status === 'fulfilled' && statusRes.value) {
+        const sVal = statusRes.value?.data || statusRes.value;
+        setContextStatus(sVal);
+      }
+    } catch (err) {
+      console.warn('[OptimizationSolverPage] Design context load warning:', err);
+    } finally {
+      if (!isCancelledCheck()) {
+        setValidationLoading(false);
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    let isCancelled = false;
+    if (!baseLoading && activeContextId) {
+      setContextStatus(null);
+      loadDesignAndValidation(activeContextId, () => isCancelled);
+    } else if (!activeContextId) {
+      setDesignContext(null);
+      setCohortValidation(null);
+      setContextStatus(null);
+    }
+    return () => {
+      isCancelled = true;
+    };
+  }, [baseLoading, activeContextId, loadDesignAndValidation]);
+
+  const isGenerationReady = cohortValidation != null ? cohortValidation.readyForGeneration : planStatus.isReady;
+  const pendingAllocationCount = cohortValidation != null
+    ? Math.max(0, (cohortValidation.totalRequiredCourses || 0) - (cohortValidation.allocatedCount || 0))
+    : planStatus.pendingCount;
+
   // Determine why the Generate button is disabled (for tooltip / label)
   const generateButtonDisabledReason = (() => {
-    if (baseLoading || coursesLoading) return 'Loading curriculum and allocations…';
+    if (baseLoading || coursesLoading || validationLoading) return 'Loading curriculum and allocations…';
     if (error) return 'Data load failed — refresh to retry';
     if (!activeContextId) return 'No active academic context — create one first';
+    if (cohortValidation && !cohortValidation.readyForGeneration) {
+      return `HOD faculty allocation incomplete for ${pendingAllocationCount} course${pendingAllocationCount > 1 ? 's' : ''}`;
+    }
     if (planStatus.totalCourses === 0) return 'No courses loaded for this cohort';
     if (catalogMissingRows.length > 0) return `HOD allocation exists for ${catalogMissingRows.length} course${catalogMissingRows.length > 1 ? 's' : ''} not in curriculum catalog — register them first`;
     if (planStatus.pendingCount > 0) return `HOD faculty allocation incomplete for ${planStatus.pendingCount} course${planStatus.pendingCount > 1 ? 's' : ''}`;
     return null;
   })();
 
-  // Trigger Timetable Generation
+  // Trigger Timetable Generation using Authoritative Endpoint (FE-P1-006)
   const handleGenerateTimetable = async () => {
-    if (!planStatus.isReady) {
+    if (!isGenerationReady) {
       showToast('Faculty allocation is pending HOD decision for one or more courses.', 'warning');
       return;
     }
@@ -235,40 +313,11 @@ export default function OptimizationSolverPage() {
       setGenerationSummary(null);
       showToast(`Generating timetable for ${selectedYear} - Section ${selectedSection}...`, 'info');
 
-      // Build authoritative assignment plan payload for real solver.
-      // Only include courses that actually exist in the curriculum catalog —
-      // HOD allocations for phantom/course-missing entries must be skipped.
-      const validCourseCodes = new Set(
-        allCatalogCourses.map((c) => (c.courseCode || '').toUpperCase().trim()).filter(Boolean)
-      );
-
-      const invalidRows = courseRows.filter(
-        (r) => r.facultyId && r.courseCode && !validCourseCodes.has(r.courseCode.toUpperCase().trim())
-      );
-      if (invalidRows.length > 0) {
-        const msg = `Timetable generation requires courses to exist in the curriculum catalog. The following allocated courses are missing: ${invalidRows.map((r) => r.courseCode).join(', ')}. Please register them via Regulation > Courses.`;
-        setGenerationError(msg);
-        showToast(msg, 'error');
-        setIsGenerating(false);
-        return;
-      }
-
-      const assignmentPlan = courseRows
-        .filter((r) => r.facultyId && r.courseCode)
-        .map((r) => ({
-          courseCode: r.courseCode,
-          facultyId: r.facultyId,
-          type: r.type === 'LAB' ? 'LAB' : 'THEORY',
-          requiredPeriods: Number(r.requiredPeriods) || 3,
-        }));
-
-      const res = await solveTimetable({
-        academicContextId: activeContextId,
-        assignmentPlan,
-      });
+      // Authoritative generation from context: server re-derives courses, faculty, and periods
+      const res = await generateFromContext(activeContextId);
 
       const data = res?.data || res;
-      const version = data.timetableVersion || {};
+      const version = data.timetableVersion || data.version || {};
       const sessionsCreated = data.sessionsCreated ?? (data.assignments?.length || 0);
 
       setGenerationSummary({
@@ -277,17 +326,18 @@ export default function OptimizationSolverPage() {
         versionLabel: version.versionLabel || 'v1.0',
         academicContextId: activeContextId,
         academicContext: `${selectedYear} | ${targetCurriculumSemester} | Section ${selectedSection}`,
-        totalCourses: planStatus.totalCourses,
+        totalCourses: cohortValidation?.totalRequiredCourses || planStatus.totalCourses,
         theoryCourses: planStatus.theoryCount,
         labCourses: planStatus.labCount,
-        allocatedCourses: planStatus.allocatedCount,
+        allocatedCourses: cohortValidation?.allocatedCount || planStatus.allocatedCount,
         sessionsCreated,
         timestamp: new Date().toLocaleTimeString(),
       });
       showToast(`Timetable successfully generated (${sessionsCreated} sessions scheduled).`, 'success');
+      loadDesignAndValidation(activeContextId);
     } catch (err) {
-      console.error('[OptimizationSolverPage] solveTimetable error:', err);
-      const errMsg = err.message || 'Timetable generation failed.';
+      console.error('[OptimizationSolverPage] generateFromContext error:', err);
+      const errMsg = describeError(err, 'Timetable generation failed.');
       setGenerationError(errMsg);
       showToast(errMsg, 'error');
     } finally {
@@ -347,7 +397,14 @@ export default function OptimizationSolverPage() {
               </div>
               <div>
                 {activeContext ? (
-                  <Badge variant="success">COHORT RESOLVED: {activeContext.department || 'CSE'} - {activeContext.section}</Badge>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                    <Badge variant="success">COHORT RESOLVED: {activeContext.department || 'CSE'} - {activeContext.section}</Badge>
+                    {contextStatus?.state && (
+                      <Badge variant={contextStatus.state === 'PUBLISHED' ? 'success' : contextStatus.state === 'APPROVED' ? 'primary' : 'secondary'}>
+                        LIFECYCLE: {contextStatus.state}
+                      </Badge>
+                    )}
+                  </div>
                 ) : (
                   <Badge variant="warning">UNREGISTERED COHORT CONTEXT</Badge>
                 )}
@@ -462,6 +519,54 @@ export default function OptimizationSolverPage() {
                 {activeContextId ? `Context ID: ${activeContextId}` : 'No active context ID'}
               </div>
             </div>
+
+            {/* Authoritative Workflow Lifecycle Status (FE-P1-008) */}
+            {activeContext && contextStatus && (
+              <div
+                style={{
+                  marginTop: '12px',
+                  padding: '12px 16px',
+                  backgroundColor:
+                    contextStatus.state === 'APPROVED' || contextStatus.state === 'PUBLISHED'
+                      ? 'rgba(16, 185, 129, 0.08)'
+                      : contextStatus.state === 'PENDING_HOD_APPROVAL' || contextStatus.state === 'GENERATED'
+                      ? 'rgba(37, 99, 235, 0.08)'
+                      : contextStatus.state === 'REJECTED' || contextStatus.state === 'ALLOCATION_INCOMPLETE'
+                      ? 'rgba(234, 179, 8, 0.1)'
+                      : 'var(--color-surface-container-low)',
+                  borderRadius: 'var(--radius-md)',
+                  border: '1px solid var(--color-outline-variant)',
+                  fontSize: '0.8125rem',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  flexWrap: 'wrap',
+                  gap: '10px',
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span style={{ fontSize: '1rem' }}>
+                    {contextStatus.state === 'PUBLISHED' ? '🌐' : contextStatus.state === 'APPROVED' ? '✅' : contextStatus.state === 'PENDING_HOD_APPROVAL' ? '⏳' : '📋'}
+                  </span>
+                  <div>
+                    <span style={{ fontWeight: 700, color: 'var(--color-primary)' }}>
+                      Authoritative Lifecycle State: {contextStatus.state || 'TIMETABLE_NOT_GENERATED'}
+                    </span>
+                    {contextStatus.message && (
+                      <span style={{ marginLeft: '8px', color: 'var(--color-on-surface-variant)' }}>
+                        — {contextStatus.message}
+                      </span>
+                    )}
+                  </div>
+                </div>
+                {contextStatus.nextAction && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <span style={{ fontWeight: 600, color: 'var(--color-outline)' }}>Next Action:</span>
+                    <Badge variant="secondary">{contextStatus.nextAction}</Badge>
+                  </div>
+                )}
+              </div>
+            )}
             {!activeContext && (
               <div
                 style={{
@@ -748,13 +853,13 @@ export default function OptimizationSolverPage() {
               <Button
                 variant="primary"
                 size="lg"
-                disabled={!planStatus.isReady || catalogMissingRows.length > 0 || isGenerating}
+                disabled={!isGenerationReady || catalogMissingRows.length > 0 || isGenerating}
                 onClick={handleGenerateTimetable}
                 title={generateButtonDisabledReason || undefined}
               >
                 {isGenerating
                   ? 'Generating Timetable...'
-                  : planStatus.isReady && catalogMissingRows.length === 0
+                  : isGenerationReady && catalogMissingRows.length === 0
                   ? 'Generate Timetable'
                   : `Generate Timetable — ${generateButtonDisabledReason}`}
               </Button>

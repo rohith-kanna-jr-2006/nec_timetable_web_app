@@ -81,215 +81,9 @@ const SEMESTER_METRICS = {
 };
 
 /**
- * Authoritative Elective Slot Definitions for Semesters V, VI, and VII
- * Source: docs/R22_CSE_2024_25_Onwards_Semester_Details.md (Elective Slot Map)
+ * Elective slot definitions are dynamically sourced from the authoritative backend curriculum endpoint:
+ * GET /api/courses/curriculum/r22 (FE-P2-011)
  */
-const ELECTIVE_SLOTS_DATA = {
-  'Semester V': [
-    {
-      courseCode: 'E1',
-      courseName: 'Elective (PEC)',
-      category: 'PEC',
-      prerequisite: '—',
-      contactPeriod: '3 (3-0-0)',
-      L: 3,
-      T: 0,
-      P: 0,
-      totalPeriod: 3,
-      credits: 3,
-      slot: 'E1',
-      allowedType: 'PEC',
-      description: 'PEC only',
-      semester: 'Semester V',
-      isSlot: true,
-      eligiblePool: '48 PEC courses from Verticals I - VI',
-    },
-    {
-      courseCode: 'E2',
-      courseName: 'Elective (PEC)',
-      category: 'PEC',
-      prerequisite: '—',
-      contactPeriod: '3 (3-0-0)',
-      L: 3,
-      T: 0,
-      P: 0,
-      totalPeriod: 3,
-      credits: 3,
-      slot: 'E2',
-      allowedType: 'PEC',
-      description: 'PEC only',
-      semester: 'Semester V',
-      isSlot: true,
-      eligiblePool: '48 PEC courses from Verticals I - VI',
-    },
-    {
-      courseCode: 'E3',
-      courseName: 'Elective (OEC/PEC)',
-      category: 'PEC/OEC',
-      prerequisite: '—',
-      contactPeriod: '3 (3-0-0)',
-      L: 3,
-      T: 0,
-      P: 0,
-      totalPeriod: 3,
-      credits: 3,
-      slot: 'E3',
-      allowedType: 'PEC / OEC',
-      description: 'PEC or OEC',
-      semester: 'Semester V',
-      isSlot: true,
-      eligiblePool: 'Programme Electives or Open Electives (22CSZ01, 22CSZ02)',
-    },
-  ],
-  'Semester VI': [
-    {
-      courseCode: 'EM',
-      courseName: 'Elective (Management)',
-      category: 'HSMC',
-      prerequisite: '—',
-      contactPeriod: '3 (3-0-0)',
-      L: 3,
-      T: 0,
-      P: 0,
-      totalPeriod: 3,
-      credits: 3,
-      slot: 'EM',
-      allowedType: 'Management Elective',
-      description: 'Management Elective',
-      semester: 'Semester VI',
-      isSlot: true,
-      eligiblePool: '22GEA02, 22GEA03, 22GEA04, 22GEZ01',
-    },
-    {
-      courseCode: 'E4',
-      courseName: 'Elective (PEC)',
-      category: 'PEC',
-      prerequisite: '—',
-      contactPeriod: '3 (3-0-0)',
-      L: 3,
-      T: 0,
-      P: 0,
-      totalPeriod: 3,
-      credits: 3,
-      slot: 'E4',
-      allowedType: 'PEC',
-      description: 'PEC only',
-      semester: 'Semester VI',
-      isSlot: true,
-      eligiblePool: '48 PEC courses from Verticals I - VI',
-    },
-    {
-      courseCode: 'E5',
-      courseName: 'Elective (PEC)',
-      category: 'PEC',
-      prerequisite: '—',
-      contactPeriod: '3 (3-0-0)',
-      L: 3,
-      T: 0,
-      P: 0,
-      totalPeriod: 3,
-      credits: 3,
-      slot: 'E5',
-      allowedType: 'PEC',
-      description: 'PEC only',
-      semester: 'Semester VI',
-      isSlot: true,
-      eligiblePool: '48 PEC courses from Verticals I - VI',
-    },
-    {
-      courseCode: 'E6',
-      courseName: 'Elective (OEC/PEC)',
-      category: 'PEC/OEC',
-      prerequisite: '—',
-      contactPeriod: '3 (3-0-0)',
-      L: 3,
-      T: 0,
-      P: 0,
-      totalPeriod: 3,
-      credits: 3,
-      slot: 'E6',
-      allowedType: 'PEC / OEC',
-      description: 'PEC or OEC',
-      semester: 'Semester VI',
-      isSlot: true,
-      eligiblePool: 'Programme Electives or Open Electives (22CSZ01, 22CSZ02)',
-    },
-  ],
-  'Semester VII': [
-    {
-      courseCode: 'E7',
-      courseName: 'Elective (PEC)',
-      category: 'PEC',
-      prerequisite: '—',
-      contactPeriod: '3 (3-0-0)',
-      L: 3,
-      T: 0,
-      P: 0,
-      totalPeriod: 3,
-      credits: 3,
-      slot: 'E7',
-      allowedType: 'PEC',
-      description: 'PEC only',
-      semester: 'Semester VII',
-      isSlot: true,
-      eligiblePool: '48 PEC courses from Verticals I - VI',
-    },
-    {
-      courseCode: 'E8',
-      courseName: 'Elective (OEC/PEC)',
-      category: 'PEC/OEC',
-      prerequisite: '—',
-      contactPeriod: '3 (3-0-0)',
-      L: 3,
-      T: 0,
-      P: 0,
-      totalPeriod: 3,
-      credits: 3,
-      slot: 'E8',
-      allowedType: 'PEC / OEC',
-      description: 'PEC or OEC',
-      semester: 'Semester VII',
-      isSlot: true,
-      eligiblePool: 'Programme Electives or Open Electives (22CSZ01, 22CSZ02)',
-    },
-    {
-      courseCode: 'E9',
-      courseName: 'Elective (OEC)',
-      category: 'OEC',
-      prerequisite: '—',
-      contactPeriod: '3 (3-0-0)',
-      L: 3,
-      T: 0,
-      P: 0,
-      totalPeriod: 3,
-      credits: 3,
-      slot: 'E9',
-      allowedType: 'OEC',
-      description: 'OEC only',
-      semester: 'Semester VII',
-      isSlot: true,
-      eligiblePool: '22CSZ01 (Python for Data Science), 22CSZ02 (Digital Marketing)',
-    },
-    {
-      courseCode: 'E10',
-      courseName: 'Elective (OEC)',
-      category: 'OEC',
-      prerequisite: '—',
-      contactPeriod: '3 (3-0-0)',
-      L: 3,
-      T: 0,
-      P: 0,
-      totalPeriod: 3,
-      credits: 3,
-      slot: 'E10',
-      allowedType: 'OEC',
-      description: 'OEC only',
-      semester: 'Semester VII',
-      isSlot: true,
-      eligiblePool: '22CSZ01 (Python for Data Science), 22CSZ02 (Digital Marketing)',
-    },
-  ],
-};
 
 const PEC_VERTICAL_NAMES = [
   'Vertical I: Machine Intelligence',
@@ -349,11 +143,12 @@ export default function RegulationPage() {
           duration: '8 Semesters (4 Academic Years)',
           totalCourses: list.length,
           courses: list,
-          electiveSlotMap: ELECTIVE_SLOTS_DATA,
+          electiveSlotMap: {},
         });
       } else {
-        setCurriculumData(res);
-        setCourses(res.courses || []);
+        const payload = res.data || res;
+        setCurriculumData(payload);
+        setCourses(payload.courses || []);
       }
     } catch (err) {
       console.error('[RegulationPage] Failed to fetch curriculum data:', err);
@@ -370,6 +165,7 @@ export default function RegulationPage() {
   // Filtered courses calculation
   const displayedCourses = useMemo(() => {
     let list = [...courses];
+    const electiveSlotMap = curriculumData?.electiveSlotMap || {};
 
     // Tab-level filtering
     if (selectedTab.startsWith('SEM_')) {
@@ -380,55 +176,9 @@ export default function RegulationPage() {
         return cSem === semKey.toUpperCase() || cSem === `SEMESTER ${roman}` || cSem === roman;
       });
 
-      // If viewing Sem V, VI, or VII, interleave or append official elective slots
-      const slots = ELECTIVE_SLOTS_DATA[semKey] || [];
-      if (slots.length > 0) {
-        // Build the official combined semester roster
-        if (semKey === 'Semester V') {
-          // Official order: 22CSC14, 22CSC15, 22CSC16, E1, E2, E3, 22CSP09, 22CSP10, 22MAN8R
-          const codeMap = new Map(coreInSem.map((c) => [c.courseCode, c]));
-          const orderedCodes = ['22CSC14', '22CSC15', '22CSC16', 'E1', 'E2', 'E3', '22CSP09', '22CSP10', '22MAN8R'];
-          const combined = [];
-          orderedCodes.forEach((code) => {
-            if (codeMap.has(code)) combined.push(codeMap.get(code));
-            else {
-              const slotItem = slots.find((s) => s.courseCode === code);
-              if (slotItem) combined.push(slotItem);
-            }
-          });
-          list = combined.length === orderedCodes.length ? combined : [...coreInSem, ...slots];
-        } else if (semKey === 'Semester VI') {
-          // Official order: 22CSC17, 22CSC18, EM, E4, E5, E6, 22CSP11, 22CSP12
-          const codeMap = new Map(coreInSem.map((c) => [c.courseCode, c]));
-          const orderedCodes = ['22CSC17', '22CSC18', 'EM', 'E4', 'E5', 'E6', '22CSP11', '22CSP12'];
-          const combined = [];
-          orderedCodes.forEach((code) => {
-            if (codeMap.has(code)) combined.push(codeMap.get(code));
-            else {
-              const slotItem = slots.find((s) => s.courseCode === code);
-              if (slotItem) combined.push(slotItem);
-            }
-          });
-          list = combined.length === orderedCodes.length ? combined : [...coreInSem, ...slots];
-        } else if (semKey === 'Semester VII') {
-          // Official order: 22GEA01, E7, E8, E9, E10, 22GED02
-          const codeMap = new Map(coreInSem.map((c) => [c.courseCode, c]));
-          const orderedCodes = ['22GEA01', 'E7', 'E8', 'E9', 'E10', '22GED02'];
-          const combined = [];
-          orderedCodes.forEach((code) => {
-            if (codeMap.has(code)) combined.push(codeMap.get(code));
-            else {
-              const slotItem = slots.find((s) => s.courseCode === code);
-              if (slotItem) combined.push(slotItem);
-            }
-          });
-          list = combined.length === orderedCodes.length ? combined : [...coreInSem, ...slots];
-        } else {
-          list = [...coreInSem, ...slots];
-        }
-      } else {
-        list = coreInSem;
-      }
+      // Interleave or append authoritative elective slots from server
+      const slots = electiveSlotMap[semKey] || [];
+      list = [...coreInSem, ...slots];
     } else if (selectedTab === 'PEC') {
       list = list.filter((c) => c.category === 'PEC' || c.electiveType === 'PEC');
       if (selectedVertical !== 'ALL') {
@@ -1014,11 +764,7 @@ export default function RegulationPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {[
-                    ...ELECTIVE_SLOTS_DATA['Semester V'],
-                    ...ELECTIVE_SLOTS_DATA['Semester VI'],
-                    ...ELECTIVE_SLOTS_DATA['Semester VII'],
-                  ].map((slot, idx) => (
+                  {Object.values(curriculumData?.electiveSlotMap || {}).flat().map((slot, idx) => (
                     <tr
                       key={idx}
                       style={{

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../../context/AuthContext';
-import { getFacultyTimetable } from '../../services/timetableService';
+import { getFacultyTimetable, getSessionFacultyList } from '../../services/timetableService';
 import PageHeader from '../../components/common/PageHeader';
 import Card from '../../components/common/Card';
 import Badge from '../../components/common/Badge';
@@ -21,7 +21,10 @@ export default function FacultyTimetablePage() {
   const [error, setError] = useState(null);
   const [scheduleMatrix, setScheduleMatrix] = useState({});
   const [sessionCount, setSessionCount] = useState(0);
+  const [versionStatus, setVersionStatus] = useState(null);
+  const [gridDays, setGridDays] = useState(WEEK_DAYS);
 
+  // Authoritative identity resolution with no fabricated fallback
   const facultyId = user?.facultyId || null;
   const facultyName = user?.name || user?.facultyName || 'Faculty Member';
 
@@ -29,16 +32,30 @@ export default function FacultyTimetablePage() {
   const academicPeriods = PERIOD_TIMINGS.filter((p) => Boolean(p.period));
 
   const loadSchedule = async () => {
+    if (!facultyId) {
+      setError('Your account is not linked to a faculty record. Please contact the Head of Department.');
+      setLoading(false);
+      return;
+    }
+
     try {
       setLoading(true);
       setError(null);
       const res = await getFacultyTimetable(facultyId);
       const sessions = res?.sessions || res?.data?.sessions || [];
       setSessionCount(sessions.length);
+      setVersionStatus(res?.status || res?.timetableVersion?.status || (res?.isInternalReview ? 'INTERNAL_REVIEW' : 'PUBLISHED'));
 
       // Build 2D matrix: [dayId][periodCode] -> session
       const matrix = {};
-      WEEK_DAYS.forEach((d) => {
+      const daysToInclude = [...WEEK_DAYS];
+      const hasSat = sessions.some((s) => (s.day || '').toUpperCase() === 'SAT');
+      if (hasSat) {
+        daysToInclude.push({ id: 'SAT', label: 'Sat', full: 'Saturday' });
+      }
+      setGridDays(daysToInclude);
+
+      daysToInclude.forEach((d) => {
         matrix[d.id] = {};
       });
 
@@ -64,7 +81,7 @@ export default function FacultyTimetablePage() {
     if (facultyId) {
       loadSchedule();
     } else {
-      setError('Faculty ID not available. Please log in again.');
+      setError('Your account is not linked to a faculty record. Please contact the Head of Department.');
       setLoading(false);
     }
   }, [facultyId]);
@@ -97,8 +114,13 @@ export default function FacultyTimetablePage() {
               {facultyName} ({facultyId})
             </div>
           </div>
-          <div style={{ display: 'flex', gap: '12px' }}>
+          <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
             <Badge variant="primary">Assigned: {sessionCount} Periods / Week</Badge>
+            {versionStatus && (
+              <Badge variant={versionStatus === 'PUBLISHED' ? 'success' : 'warning'}>
+                {versionStatus === 'PUBLISHED' ? 'OFFICIAL PUBLISHED' : versionStatus}
+              </Badge>
+            )}
             <Badge variant="neutral">Department: {user?.department || 'Computer Science & Engineering'}</Badge>
           </div>
         </div>
@@ -179,7 +201,7 @@ export default function FacultyTimetablePage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {WEEK_DAYS.map((d) => (
+                  {gridDays.map((d) => (
                     <tr key={d.id} style={{ borderBottom: '1px solid var(--color-surface-container)' }}>
                       <td
                         style={{
@@ -195,6 +217,9 @@ export default function FacultyTimetablePage() {
                       {academicPeriods.map((p) => {
                         const session = scheduleMatrix[d.id]?.[p.period];
                         const isLab = session?.sessionType === 'LAB';
+                        const assignments = getSessionFacultyList(session);
+                        const coFaculty = assignments.filter((fa) => fa.facultyId !== facultyId);
+
                         return (
                           <td
                             key={p.period}
@@ -237,6 +262,11 @@ export default function FacultyTimetablePage() {
                                   Class: {session.year ? `Yr ${session.year}` : ''}{' '}
                                   {session.section ? `Sec ${session.section}` : session.room || 'Classroom'}
                                 </span>
+                                {coFaculty.length > 0 && (
+                                  <span style={{ fontSize: '0.65rem', color: 'var(--color-primary)', fontWeight: 600 }} title={coFaculty.map((cf) => `${cf.facultyName || cf.facultyId} (${cf.role})`).join(', ')}>
+                                    With: {coFaculty.map((cf) => cf.facultyName || cf.facultyId).join(', ')}
+                                  </span>
+                                )}
                               </div>
                             ) : (
                               <span style={{ color: 'var(--color-outline)', fontSize: '0.75rem' }}>FREE</span>

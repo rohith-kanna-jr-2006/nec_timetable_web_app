@@ -65,6 +65,15 @@ export async function getAllocationContext(academicContextId) {
 }
 
 /**
+ * Validate cohort allocations completeness for generation readiness
+ * GET /api/hod-allocations/validate/:academicContextId
+ */
+export async function validateCohortAllocations(academicContextId) {
+  const response = await api.get(`/hod-allocations/validate/${encodeURIComponent(academicContextId)}`);
+  return response?.data || response;
+}
+
+/**
  * Save / update multi-role course allocation under an academic context
  * PUT /api/hod-allocations/context/:academicContextId/course/:courseCode
  */
@@ -134,6 +143,7 @@ export async function transitionTimetableVersion(id, status, rejectionReason = n
 export default {
   getHODAllocations,
   getAllocationContext,
+  validateCohortAllocations,
   saveCourseAllocation,
   createHODAllocation,
   updateHODAllocation,

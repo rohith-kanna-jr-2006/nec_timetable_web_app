@@ -27,7 +27,7 @@ export function ToastProvider({ children }) {
     <ToastContext.Provider value={{ showToast }}>
       {children}
       {toasts.length > 0 && (
-        <div className="ui-toast-container">
+        <div className="ui-toast-container" aria-live="polite" aria-atomic="true">
           {toasts.map((toast) => (
             <Toast
               key={toast.id}
