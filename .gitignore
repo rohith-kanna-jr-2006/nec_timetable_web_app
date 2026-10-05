@@ -45,3 +45,6 @@ screenshot*.jpeg
 *screenshot*.jpeg
 *.webm
 *.mp4
+
+*.patch
+*.bak
