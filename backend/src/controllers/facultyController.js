@@ -1,5 +1,6 @@
 const mongoose = require('mongoose');
 const Faculty = require('../models/Faculty');
+const User = require('../models/User');
 const FacultyWorkload = require('../models/FacultyWorkload');
 const {
   formatFacultyAllocations,
@@ -11,6 +12,12 @@ const {
 const { getCanonicalRoleName } = require('../constants/responsibilityMaster');
 const { successResponse, errorResponse } = require('../utils/responseHandler');
 const { getPaginationParams, formatPaginatedResult } = require('../utils/pagination');
+const {
+  buildFacultyUpdatePayload,
+  FACULTY_EDITABLE_FIELDS,
+} = require('../validators/facultyCreationValidators');
+const { createFacultyWithCredential } = require('../services/facultyCredentialService');
+const { toDateOfBirth } = require('../utils/facultyCredentials');
 
 /**
  * Get all faculty with search and filtering
@@ -33,7 +40,15 @@ async function getFacultyList(req, res, next) {
     }
 
     if (department) {
-      query.department = { $regex: department.trim(), $options: 'i' };
+      const deptStr = department.trim();
+      const norm = deptStr.toUpperCase();
+      if (norm === 'CSE' || norm.includes('COMPUTER')) {
+        query.department = { $regex: 'Computer Science|CSE', $options: 'i' };
+      } else if (norm === 'ECE' || norm.includes('ELECTRONICS')) {
+        query.department = { $regex: 'Electronics|ECE', $options: 'i' };
+      } else {
+        query.department = { $regex: deptStr, $options: 'i' };
+      }
     }
 
     if (role) {
@@ -151,6 +166,7 @@ async function createFaculty(req, res, next) {
       department,
       email,
       phone,
+      dateOfBirth,
       roles,
       teaching: rawTeaching,
       ugTheory1,
@@ -161,6 +177,7 @@ async function createFaculty(req, res, next) {
       others,
       responsibilities: rawResponsibilities,
       sourceTotalHours: rawSourceTotalHours,
+      dateOfBirth: rawDateOfBirth,
     } = req.body;
 
     // 1. Resolve Faculty ID (auto-generate if omitted)
@@ -267,15 +284,19 @@ async function createFaculty(req, res, next) {
     // 5. Dual Persistence with Compensating Atomic Rollback Strategy
     let createdFaculty = null;
     let createdWorkload = null;
+    let createdUser = null;
 
     try {
       createdFaculty = await Faculty.create({
         facultyId: finalFacultyId,
         facultyName: facultyName.trim(),
+        // Phase 9: stored as UTC midnight so the calendar day cannot drift.
+        dateOfBirth: rawDateOfBirth ? toDateOfBirth(rawDateOfBirth) : null,
         designation: designation.trim(),
         department: dept,
         email: email ? email.trim() : undefined,
         phone: phone ? phone.trim() : null,
+        dateOfBirth: dateOfBirth ? new Date(dateOfBirth) : null,
         roles: roles && roles.length > 0 ? roles : ['FACULTY'],
       });
 
@@ -295,6 +316,20 @@ async function createFaculty(req, res, next) {
         isIncomplete: false,
         sourceVersion: 'v1.0-hod-entry',
       });
+    // Phase 9: when a date of birth is supplied, derive the initial credential
+      // (DDMMYYYY), hash it with bcryptjs and persist ONLY the hash on a User
+      // account linked by facultyId. The plaintext value is never stored, logged
+      // or returned. Without a dateOfBirth no account is created, which keeps the
+      // pre-Phase-9 creation workflow unchanged.
+      createdUser = await createFacultyWithCredential(
+        {
+          dateOfBirth: rawDateOfBirth,
+          email,
+          facultyName,
+          roles,
+        },
+        { facultyId: finalFacultyId }
+      );
     } catch (persistError) {
       // Compensating rollback: Clean up any partial state so DB is never left inconsistent
       if (createdFaculty) {
@@ -302,6 +337,9 @@ async function createFaculty(req, res, next) {
       }
       if (createdWorkload) {
         await FacultyWorkload.deleteOne({ _id: createdWorkload._id }).catch(() => {});
+      }
+      if (createdUser) {
+        await User.deleteOne({ _id: createdUser._id }).catch(() => {});
       }
       throw persistError;
     }
@@ -339,12 +377,44 @@ async function createFaculty(req, res, next) {
 /**
  * Update Faculty record
  * PUT /api/faculty/:facultyId
+ *
+ * Phase 9: only the mutable Faculty Information fields may be written
+ * (facultyName, email, dateOfBirth, designation, phone). Every other field is
+ * rejected explicitly. The previous implementation passed the raw request body
+ * straight into findOneAndUpdate, which allowed role, department, facultyId,
+ * isActive and any other field to be mass-assigned.
+ *
+ * This endpoint never writes a credential, so an existing User.passwordHash is
+ * always preserved: editing faculty information cannot reset a password.
  */
 async function updateFaculty(req, res, next) {
   try {
     const { facultyId } = req.params;
 
-    const faculty = await Faculty.findOneAndUpdate({ facultyId }, req.body, {
+    const update = buildFacultyUpdatePayload(req.body);
+
+    if (Object.keys(update).length === 0) {
+      return errorResponse(
+        res,
+        'No updatable Faculty Information field was supplied',
+        400,
+        'NO_UPDATABLE_FIELDS',
+        { allowed: FACULTY_EDITABLE_FIELDS }
+      );
+    }
+
+    // Email uniqueness must still hold across the Faculty master.
+    if (update.email) {
+      const duplicate = await Faculty.findOne({
+        email: update.email.toLowerCase(),
+        facultyId: { $ne: facultyId },
+      });
+      if (duplicate) {
+        return errorResponse(res, `Faculty with email '${update.email}' already exists`, 409, 'DUPLICATE_EMAIL');
+      }
+    }
+
+    const faculty = await Faculty.findOneAndUpdate({ facultyId }, { $set: update }, {
       new: true,
       runValidators: true,
     });

@@ -101,6 +101,7 @@ timetableSessionSchema.index(
   { timetableVersionId: 1, academicContextId: 1, day: 1, period: 1 },
   { name: 'session_class_slot_idx', unique: true, partialFilterExpression: { academicContextId: { $exists: true, $ne: null } } }
 );
+timetableSessionSchema.index({ academicContextId: 1, timetableVersionId: 1 });
 timetableSessionSchema.index({ 'facultyAssignments.facultyId': 1 });
 
 module.exports = mongoose.model('TimetableSession', timetableSessionSchema);

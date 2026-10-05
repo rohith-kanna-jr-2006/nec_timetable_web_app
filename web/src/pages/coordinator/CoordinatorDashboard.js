@@ -67,13 +67,13 @@ export default function CoordinatorDashboard() {
   return (
     <div>
       <PageHeader
-        title="Academic Coordinator Operational Desk"
+        title="TimeTable Coordinator Operational Desk"
         description="Curriculum subject mapping, candidate faculty pool nominations, and automated timetable scheduling suite."
         breadcrumbs={[
           { label: 'Coordinator Portal', path: '/coordinator/dashboard' },
           { label: 'Operational Desk' },
         ]}
-        badge={<Badge variant="secondary">ACADEMIC COORD (L2)</Badge>}
+        badge={<Badge variant="secondary">TIME TABLE COORD (TC)</Badge>}
         actions={
           <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
             <Button
@@ -90,7 +90,15 @@ export default function CoordinatorDashboard() {
               icon="⚡"
               onClick={() => navigate('/coordinator/optimization')}
             >
-              Solver Studio
+              Timetable Design
+            </Button>
+            <Button
+              variant="primary"
+              size="sm"
+              icon="📅"
+              onClick={() => navigate('/coordinator/view')}
+            >
+              View Timetable
             </Button>
           </div>
         }
@@ -294,7 +302,7 @@ export default function CoordinatorDashboard() {
               }}
             >
               <span style={{ fontSize: '1.5rem' }}>⚡</span>
-              <span style={{ fontSize: '0.8125rem', fontWeight: 600 }}>Solver Studio</span>
+              <span style={{ fontSize: '0.8125rem', fontWeight: 600 }}>Timetable Design</span>
             </button>
           </div>
         </Card>
@@ -318,7 +326,7 @@ export default function CoordinatorDashboard() {
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
               <Badge variant="success">Step 3</Badge>
               <span style={{ fontWeight: 600 }}>Nominate Candidate Faculty Pools</span>
-              <span style={{ fontSize: '0.75rem', color: 'var(--color-outline)' }}>AC Recommendations</span>
+              <span style={{ fontSize: '0.75rem', color: 'var(--color-outline)' }}>TC Recommendations</span>
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
               <Badge variant="secondary">Step 4</Badge>

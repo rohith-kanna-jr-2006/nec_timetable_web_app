@@ -27,12 +27,15 @@ export default function AcademicContextPage({ portalType = 'HOD' }) {
   const [formValidation, setFormValidation] = useState('');
 
   const [formData, setFormData] = useState({
-    academicYear: '2024-2025',
-    semester: 'ODD',
+    academicYear: '',
+    semester: '',
+    fromYear: '',
+    toYear: '',
     department: 'CSE',
-    year: 'III Year',
-    section: 'A',
+    year: '',
+    section: '',
     program: 'UG',
+    regulation: '',
     status: 'ACTIVE',
   });
 
@@ -58,22 +61,26 @@ export default function AcademicContextPage({ portalType = 'HOD' }) {
   const handleCreate = async (e) => {
     e.preventDefault();
     if (!formData.academicYear || !formData.semester || !formData.year || !formData.section) {
-      setFormValidation('All academic context fields are required.');
+      setFormValidation('Academic Year, Semester, Cohort Year, and Section are required.');
       return;
     }
 
     try {
       setCreating(true);
       setFormValidation('');
-      await createAcademicContext({
+      const payload = {
         academicYear: formData.academicYear.trim(),
         semester: formData.semester.trim(),
+        fromYear: formData.fromYear.trim() || undefined,
+        toYear: formData.toYear.trim() || undefined,
         department: formData.department.trim(),
         year: formData.year.trim(),
         section: formData.section.toUpperCase().trim(),
         program: formData.program,
+        regulation: formData.regulation.trim() || undefined,
         status: formData.status,
-      });
+      };
+      await createAcademicContext(payload);
       showToast('Academic context registered successfully.', 'success');
       setIsModalOpen(false);
       await loadContexts();
@@ -107,7 +114,7 @@ export default function AcademicContextPage({ portalType = 'HOD' }) {
           { label: `${portalType} Portal`, path: `${basePath}/dashboard` },
           { label: 'Academic Context' },
         ]}
-        badge={<Badge variant="primary">R2022 CURRICULUM</Badge>}
+        badge={<Badge variant="primary">ACADEMIC CONTEXTS</Badge>}
         actions={
           <Button
             variant="primary"
@@ -165,6 +172,7 @@ export default function AcademicContextPage({ portalType = 'HOD' }) {
                 <tr style={{ backgroundColor: 'var(--color-surface-container-low)', textAlign: 'left', borderBottom: '1px solid var(--color-surface-container)' }}>
                   <th style={{ padding: '12px 16px', fontWeight: 600 }}>Academic Year</th>
                   <th style={{ padding: '12px 16px', fontWeight: 600 }}>Semester</th>
+                  <th style={{ padding: '12px 16px', fontWeight: 600 }}>Regulation</th>
                   <th style={{ padding: '12px 16px', fontWeight: 600 }}>Department</th>
                   <th style={{ padding: '12px 16px', fontWeight: 600 }}>Cohort Year</th>
                   <th style={{ padding: '12px 16px', fontWeight: 600 }}>Section</th>
@@ -175,9 +183,19 @@ export default function AcademicContextPage({ portalType = 'HOD' }) {
               <tbody>
                 {contexts.map((ctx) => (
                   <tr key={ctx._id} style={{ borderBottom: '1px solid var(--color-surface-container)' }}>
-                    <td style={{ padding: '12px 16px', fontWeight: 600 }}>{ctx.academicYear}</td>
+                    <td style={{ padding: '12px 16px', fontWeight: 600, fontFamily: 'var(--font-mono)' }}>
+                      {ctx.academicYear}
+                      {ctx.fromYear || ctx.toYear ? (
+                        <span style={{ fontSize: '0.75rem', color: 'var(--color-outline)', fontWeight: 400, marginLeft: '4px' }}>
+                          ({ctx.fromYear || ctx.academicYear}–{ctx.toYear || ctx.academicYear})
+                        </span>
+                      ) : null}
+                    </td>
                     <td style={{ padding: '12px 16px' }}>
-                      <Badge variant="secondary">{ctx.semester}</Badge>
+                      <Badge variant="secondary">{ctx.semester || '—'}</Badge>
+                    </td>
+                    <td style={{ padding: '12px 16px' }}>
+                      {ctx.regulation ? <Badge variant="outline">{ctx.regulation}</Badge> : <span style={{ color: 'var(--color-outline)' }}>—</span>}
                     </td>
                     <td style={{ padding: '12px 16px' }}>{ctx.department}</td>
                     <td style={{ padding: '12px 16px', fontWeight: 600, color: 'var(--color-primary)' }}>
@@ -225,19 +243,34 @@ export default function AcademicContextPage({ portalType = 'HOD' }) {
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '14px' }}>
               <div>
                 <label style={{ display: 'block', fontSize: '0.8125rem', fontWeight: 600, marginBottom: '6px' }}>
-                  Academic Year
+                  Academic Year (From)
                 </label>
-                <select
+                <input
+                  type="text"
+                  placeholder="e.g., 2025-2026"
                   value={formData.academicYear}
                   onChange={(e) => setFormData({ ...formData, academicYear: e.target.value })}
                   className="form-select"
                   style={{ width: '100%', padding: '8px 10px', borderRadius: 'var(--radius-md)', border: '1px solid var(--color-outline-variant)' }}
-                >
-                  <option value="2024-2025">2024-2025</option>
-                  <option value="2025-2026">2025-2026</option>
-                </select>
+                />
               </div>
 
+              <div>
+                <label style={{ display: 'block', fontSize: '0.8125rem', fontWeight: 600, marginBottom: '6px' }}>
+                  Academic Year (To)
+                </label>
+                <input
+                  type="text"
+                  placeholder="e.g., 2026-2027"
+                  value={formData.toYear}
+                  onChange={(e) => setFormData({ ...formData, toYear: e.target.value })}
+                  className="form-select"
+                  style={{ width: '100%', padding: '8px 10px', borderRadius: 'var(--radius-md)', border: '1px solid var(--color-outline-variant)' }}
+                />
+              </div>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '14px' }}>
               <div>
                 <label style={{ display: 'block', fontSize: '0.8125rem', fontWeight: 600, marginBottom: '6px' }}>
                   Semester
@@ -248,9 +281,24 @@ export default function AcademicContextPage({ portalType = 'HOD' }) {
                   className="form-select"
                   style={{ width: '100%', padding: '8px 10px', borderRadius: 'var(--radius-md)', border: '1px solid var(--color-outline-variant)' }}
                 >
+                  <option value="">Select Semester</option>
                   <option value="ODD">ODD SEMESTER</option>
                   <option value="EVEN">EVEN SEMESTER</option>
                 </select>
+              </div>
+
+              <div>
+                <label style={{ display: 'block', fontSize: '0.8125rem', fontWeight: 600, marginBottom: '6px' }}>
+                  Regulation
+                </label>
+                <input
+                  type="text"
+                  placeholder="e.g., R22"
+                  value={formData.regulation}
+                  onChange={(e) => setFormData({ ...formData, regulation: e.target.value })}
+                  className="form-select"
+                  style={{ width: '100%', padding: '8px 10px', borderRadius: 'var(--radius-md)', border: '1px solid var(--color-outline-variant)' }}
+                />
               </div>
             </div>
 

@@ -259,13 +259,20 @@ async function getAcademicContextWorkflowStatus(academicContextId) {
   const isAllocationComplete = missing.length === 0;
 
   // 5. Query Timetable Versions for this Academic Context
-  const versions = await TimetableVersion.find({
-    academicYear: context.academicYear,
-    semester: context.semester,
-    department: context.department,
-    year: context.year,
-    section: context.section,
+  // Phase 2: Prefer academicContextId direct anchor, fall back to 5-field query
+  let versions = await TimetableVersion.find({
+    academicContextId: context._id,
   }).sort({ createdAt: -1 });
+
+  if (versions.length === 0) {
+    versions = await TimetableVersion.find({
+      academicYear: context.academicYear,
+      semester: context.semester,
+      department: context.department,
+      year: context.year,
+      section: context.section,
+    }).sort({ createdAt: -1 });
+  }
 
   const publishedVersion = versions.find((v) => v.status === 'PUBLISHED') || null;
   const latestVersion = versions[0] || null;
@@ -325,7 +332,9 @@ async function getAcademicContextWorkflowStatus(academicContextId) {
       program: context.program,
       status: context.status,
     },
-    regulation: 'R22',
+    // Phase 10: derived from the context's programme rather than hardcoded, so a
+    // PG cohort reports R22-PG instead of always claiming R22.
+    regulation: require('./electiveSelectionService').regulationForContext(context),
     year: context.year,
     semester: expectedSemester,
     section: context.section,

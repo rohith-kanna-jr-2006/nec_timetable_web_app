@@ -16,6 +16,7 @@ export function getDefaultDashboard(role) {
   switch (role) {
     case 'HOD':
       return '/hod/dashboard';
+    case 'TC':
     case 'AC':
       return '/coordinator/dashboard';
     case 'ADMIN':

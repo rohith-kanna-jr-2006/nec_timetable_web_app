@@ -35,7 +35,7 @@ export default function FacultyListPage() {
 
   // Edit Faculty Modal State
   const [editingFaculty, setEditingFaculty] = useState(null);
-  const [editFormData, setEditFormData] = useState({ facultyName: '', designation: '' });
+  const [editFormData, setEditFormData] = useState({ facultyName: '', designation: '', dob: '', email: '', phone: '' });
   const [editSubmitting, setEditSubmitting] = useState(false);
   const [editError, setEditError] = useState('');
 
@@ -88,6 +88,9 @@ export default function FacultyListPage() {
     setEditFormData({
       facultyName: faculty.facultyName || '',
       designation: faculty.designation || FACULTY_DESIGNATIONS[0],
+      dob: faculty.dob || '',
+      email: faculty.email || '',
+      phone: faculty.phone || '',
     });
     setEditError('');
   };
@@ -105,6 +108,9 @@ export default function FacultyListPage() {
       await updateFaculty(editingFaculty.facultyId, {
         facultyName: editFormData.facultyName.trim(),
         designation: editFormData.designation,
+        dob: editFormData.dob || undefined,
+        email: editFormData.email.trim() || undefined,
+        phone: editFormData.phone.trim() || undefined,
       });
       showToast('Faculty profile updated successfully.', 'success');
       setEditingFaculty(null);
@@ -389,6 +395,45 @@ export default function FacultyListPage() {
                 value={editFormData.designation}
                 onChange={(e) => setEditFormData({ ...editFormData, designation: e.target.value })}
                 options={FACULTY_DESIGNATIONS.map((d) => ({ value: d, label: d }))}
+                disabled={editSubmitting}
+              />
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+              <div>
+                <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, marginBottom: '4px' }}>
+                  Date of Birth
+                </label>
+                <Input
+                  type="date"
+                  value={editFormData.dob}
+                  onChange={(e) => setEditFormData({ ...editFormData, dob: e.target.value })}
+                  disabled={editSubmitting}
+                />
+              </div>
+              <div>
+                <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, marginBottom: '4px' }}>
+                  Phone Number
+                </label>
+                <Input
+                  type="tel"
+                  placeholder="e.g., 9876543210"
+                  value={editFormData.phone}
+                  onChange={(e) => setEditFormData({ ...editFormData, phone: e.target.value })}
+                  disabled={editSubmitting}
+                />
+              </div>
+            </div>
+
+            <div>
+              <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, marginBottom: '4px' }}>
+                Email Address
+              </label>
+              <Input
+                type="email"
+                placeholder="e.g., name@nec.edu.in"
+                value={editFormData.email}
+                onChange={(e) => setEditFormData({ ...editFormData, email: e.target.value })}
                 disabled={editSubmitting}
               />
             </div>

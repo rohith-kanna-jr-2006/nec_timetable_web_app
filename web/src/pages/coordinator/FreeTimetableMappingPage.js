@@ -15,9 +15,12 @@ import { getAbsences } from '../../services/absenceService';
 import { getFacultyList } from '../../services/facultyService';
 import {
   getSubstitutes,
+  getAffectedSessions,
+  getEligibleFaculty,
   assignSubstitute,
   updateSubstituteStatus,
 } from '../../services/substituteService';
+import { describeError } from '../../services/api';
 import { PERIOD_TIMINGS, WEEK_DAYS } from '../../constants/schedule';
 
 export default function FreeTimetableMappingPage() {
@@ -35,6 +38,12 @@ export default function FreeTimetableMappingPage() {
   const [mappingSubmitting, setMappingSubmitting] = useState(false);
   const [mappingError, setMappingError] = useState('');
 
+  // Authoritative affected sessions & eligible faculty (FE-P0-004)
+  const [affectedSessions, setAffectedSessions] = useState([]);
+  const [loadingSessions, setLoadingSessions] = useState(false);
+  const [eligibleFaculty, setEligibleFaculty] = useState([]);
+  const [loadingEligible, setLoadingEligible] = useState(false);
+
   const [formData, setFormData] = useState({
     absenceId: '',
     originalFacultyId: '',
@@ -42,6 +51,7 @@ export default function FreeTimetableMappingPage() {
     date: new Date().toISOString().split('T')[0],
     period: 'P1',
     timetableSessionId: '',
+    academicContextId: '',
   });
 
   const loadAllData = async () => {
@@ -78,44 +88,117 @@ export default function FreeTimetableMappingPage() {
     loadAllData();
   }, []);
 
-  const handleOpenMappingModal = (absence = null) => {
-    if (absence) {
-      setFormData({
-        absenceId: absence._id || '',
-        originalFacultyId: absence.facultyId || '',
-        substituteFacultyId: '',
-        date: absence.startDate ? absence.startDate.split('T')[0] : new Date().toISOString().split('T')[0],
-        period: 'P1',
-        timetableSessionId: '',
-      });
-    } else {
-      setFormData({
-        absenceId: absences.length > 0 ? absences[0]._id : '',
-        originalFacultyId: absences.length > 0 ? absences[0].facultyId : '',
-        substituteFacultyId: '',
-        date: new Date().toISOString().split('T')[0],
-        period: 'P1',
-        timetableSessionId: '',
-      });
+  const loadEligibleForSession = async (sessId, absId, date, ctxId) => {
+    if (!sessId) {
+      setEligibleFaculty([]);
+      return;
     }
+    try {
+      setLoadingEligible(true);
+      setEligibleFaculty([]);
+      const res = await getEligibleFaculty({
+        timetableSessionId: sessId,
+        absenceId: absId || undefined,
+        date: date || undefined,
+        academicContextId: ctxId || undefined,
+      });
+      const data = res?.data || res;
+      const elList = Array.isArray(data?.eligibleFaculty) ? data.eligibleFaculty : [];
+      setEligibleFaculty(elList);
+    } catch (err) {
+      console.warn('[FreeTimetableMappingPage] Failed to fetch eligible faculty:', err);
+      setEligibleFaculty([]);
+    } finally {
+      setLoadingEligible(false);
+    }
+  };
+
+  const loadSessionsForAbsence = async (absId, date, facId) => {
+    if (!absId && !facId) return;
+    try {
+      setLoadingSessions(true);
+      setAffectedSessions([]);
+      setEligibleFaculty([]);
+      const res = await getAffectedSessions({
+        absenceId: absId || undefined,
+        date: date || undefined,
+      });
+      const data = res?.data || res;
+      const sessList = Array.isArray(data?.sessions) ? data.sessions : [];
+      setAffectedSessions(sessList);
+      if (sessList.length > 0) {
+        const first = sessList[0];
+        setFormData((prev) => ({
+          ...prev,
+          timetableSessionId: first._id || first.id || '',
+          period: first.period || prev.period,
+          academicContextId: first.academicContextId || '',
+        }));
+        await loadEligibleForSession(first._id || first.id, absId, date, first.academicContextId);
+      }
+    } catch (err) {
+      console.warn('[FreeTimetableMappingPage] Failed to fetch affected sessions:', err);
+      setAffectedSessions([]);
+    } finally {
+      setLoadingSessions(false);
+    }
+  };
+
+  const handleOpenMappingModal = (absence = null) => {
+    const targetAbs = absence || (absences.length > 0 ? absences[0] : null);
+    const targetDate = targetAbs && targetAbs.startDate
+      ? targetAbs.startDate.split('T')[0]
+      : new Date().toISOString().split('T')[0];
+    const initialData = {
+      absenceId: targetAbs?._id || '',
+      originalFacultyId: targetAbs?.facultyId || '',
+      substituteFacultyId: '',
+      date: targetDate,
+      period: 'P1',
+      timetableSessionId: '',
+      academicContextId: '',
+    };
+    setFormData(initialData);
     setMappingError('');
     setIsModalOpen(true);
+    if (targetAbs) {
+      loadSessionsForAbsence(targetAbs._id, targetDate, targetAbs.facultyId);
+    }
   };
 
   const handleAbsenceSelectChange = (absenceId) => {
     const found = absences.find((a) => a._id === absenceId);
+    const targetDate = found && found.startDate ? found.startDate.split('T')[0] : formData.date;
+    const targetFacId = found ? found.facultyId : formData.originalFacultyId;
     setFormData((prev) => ({
       ...prev,
       absenceId,
-      originalFacultyId: found ? found.facultyId : prev.originalFacultyId,
-      date: found && found.startDate ? found.startDate.split('T')[0] : prev.date,
+      originalFacultyId: targetFacId,
+      date: targetDate,
+      substituteFacultyId: '',
+      timetableSessionId: '',
+      academicContextId: '',
     }));
+    loadSessionsForAbsence(absenceId, targetDate, targetFacId);
+  };
+
+  const handleSessionSelectChange = (sessionId) => {
+    const found = affectedSessions.find((s) => (s._id || s.id) === sessionId);
+    if (!found) return;
+    setFormData((prev) => ({
+      ...prev,
+      timetableSessionId: sessionId,
+      period: found.period || prev.period,
+      academicContextId: found.academicContextId || '',
+      substituteFacultyId: '',
+    }));
+    loadEligibleForSession(sessionId, formData.absenceId, formData.date, found.academicContextId);
   };
 
   const handleAssignSubmit = async (e) => {
     e.preventDefault();
     if (!formData.substituteFacultyId) {
-      setMappingError('Please select an available substitute faculty member.');
+      setMappingError('Please select an eligible substitute faculty member from the authoritative list.');
       return;
     }
     if (formData.substituteFacultyId === formData.originalFacultyId) {
@@ -130,6 +213,8 @@ export default function FreeTimetableMappingPage() {
         absenceId: formData.absenceId || undefined,
         originalFacultyId: formData.originalFacultyId,
         substituteFacultyId: formData.substituteFacultyId,
+        timetableSessionId: formData.timetableSessionId || undefined,
+        academicContextId: formData.academicContextId || undefined,
         date: formData.date,
         period: formData.period,
       });
@@ -138,7 +223,7 @@ export default function FreeTimetableMappingPage() {
       await loadAllData();
     } catch (err) {
       console.error('[FreeTimetableMappingPage] Assignment failed:', err);
-      setMappingError(err.message || 'Failed to assign substitute.');
+      setMappingError(describeError(err, 'Failed to assign substitute.'));
     } finally {
       setMappingSubmitting(false);
     }
@@ -164,7 +249,7 @@ export default function FreeTimetableMappingPage() {
           { label: 'Coordinator Portal', path: '/coordinator/dashboard' },
           { label: 'Free Timetable Mapping' },
         ]}
-        badge={<Badge variant="secondary">AC OPERATIONAL DESK</Badge>}
+        badge={<Badge variant="secondary">TIME TABLE COORDINATOR DESK</Badge>}
         actions={
           <Button
             variant="primary"
@@ -366,24 +451,24 @@ export default function FreeTimetableMappingPage() {
               </div>
             )}
 
-            {/* Step 1: Select Absent Faculty */}
+            {/* Step 1: Select Absent Faculty & Absence Record */}
             <div>
               <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, marginBottom: '4px' }}>
-                Original Absent Faculty *
+                Reported Faculty Absence *
               </label>
               <Select
-                value={formData.originalFacultyId}
-                onChange={(e) => setFormData({ ...formData, originalFacultyId: e.target.value })}
-                options={facultyList.map((f) => ({
-                  value: f.facultyId,
-                  label: `${f.facultyName} (${f.facultyId})`,
+                value={formData.absenceId}
+                onChange={(e) => handleAbsenceSelectChange(e.target.value)}
+                options={absences.map((a) => ({
+                  value: a._id,
+                  label: `${a.facultyName || a.facultyId} — ${a.reason || 'Leave'} (${a.startDate ? a.startDate.split('T')[0] : 'No date'})`,
                 }))}
                 required
                 disabled={mappingSubmitting}
               />
             </div>
 
-            {/* Step 2: Target Date and Period */}
+            {/* Step 2: Target Date and Affected Timetable Sessions */}
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
               <div>
                 <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, marginBottom: '4px' }}>
@@ -392,7 +477,11 @@ export default function FreeTimetableMappingPage() {
                 <Input
                   type="date"
                   value={formData.date}
-                  onChange={(e) => setFormData({ ...formData, date: e.target.value })}
+                  onChange={(e) => {
+                    const newDate = e.target.value;
+                    setFormData((prev) => ({ ...prev, date: newDate }));
+                    loadSessionsForAbsence(formData.absenceId, newDate, formData.originalFacultyId);
+                  }}
                   required
                   disabled={mappingSubmitting}
                 />
@@ -415,26 +504,61 @@ export default function FreeTimetableMappingPage() {
               </div>
             </div>
 
-            {/* Step 3: Select Available Substitute Faculty */}
+            {/* Affected Timetable Session (Authoritative) */}
             <div>
               <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, marginBottom: '4px' }}>
-                Available Substitute Faculty *
+                Affected Timetable Session * {affectedSessions.length > 0 && `(${affectedSessions.length} detected)`}
               </label>
-              <Select
-                value={formData.substituteFacultyId}
-                onChange={(e) => setFormData({ ...formData, substituteFacultyId: e.target.value })}
-                options={[
-                  { value: '', label: '-- Choose Available Faculty --' },
-                  ...facultyList
-                    .filter((f) => f.facultyId !== formData.originalFacultyId)
-                    .map((f) => ({
+              {loadingSessions ? (
+                <div style={{ padding: '8px 12px', display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.8125rem', color: 'var(--color-outline)' }}>
+                  <Spinner size="sm" /> Finding affected sessions...
+                </div>
+              ) : affectedSessions.length === 0 ? (
+                <div style={{ padding: '8px 12px', background: 'var(--color-surface-container)', borderRadius: '6px', fontSize: '0.8125rem', color: 'var(--color-outline)' }}>
+                  ℹ️ No affected timetable sessions recorded for this faculty absence on {formData.date}.
+                </div>
+              ) : (
+                <Select
+                  value={formData.timetableSessionId}
+                  onChange={(e) => handleSessionSelectChange(e.target.value)}
+                  options={affectedSessions.map((s) => ({
+                    value: s._id || s.id,
+                    label: `${s.courseCode || 'Course'} (${s.courseName || s.subject || ''}) • ${s.day} ${s.period} • Room ${s.room || 'LH'}`,
+                  }))}
+                  required
+                  disabled={mappingSubmitting}
+                />
+              )}
+            </div>
+
+            {/* Step 3: Authoritative Eligible Substitute Faculty */}
+            <div>
+              <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, marginBottom: '4px' }}>
+                Eligible Substitute Faculty * (Authoritative Engine)
+              </label>
+              {loadingEligible ? (
+                <div style={{ padding: '8px 12px', display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.8125rem', color: 'var(--color-outline)' }}>
+                  <Spinner size="sm" /> Evaluating timetable constraints & slot availability...
+                </div>
+              ) : eligibleFaculty.length === 0 ? (
+                <div style={{ padding: '10px 14px', background: 'var(--color-warning-container)', color: 'var(--color-on-warning-container)', borderRadius: '6px', fontSize: '0.8125rem' }}>
+                  ⚠️ Zero eligible substitute faculty available for this session slot (existing class commitments, absence, or availability restrictions).
+                </div>
+              ) : (
+                <Select
+                  value={formData.substituteFacultyId}
+                  onChange={(e) => setFormData({ ...formData, substituteFacultyId: e.target.value })}
+                  options={[
+                    { value: '', label: `-- Choose from ${eligibleFaculty.length} Eligible Faculty --` },
+                    ...eligibleFaculty.map((f) => ({
                       value: f.facultyId,
-                      label: `${f.facultyName} (${f.facultyId}) — ${f.designation}`,
+                      label: `${f.facultyName || f.name} (${f.facultyId}) — ${f.designation || 'Faculty'}`,
                     })),
-                ]}
-                required
-                disabled={mappingSubmitting}
-              />
+                  ]}
+                  required
+                  disabled={mappingSubmitting}
+                />
+              )}
             </div>
 
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '16px' }}>

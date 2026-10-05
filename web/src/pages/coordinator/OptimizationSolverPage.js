@@ -1,10 +1,11 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useToast } from '../../context/ToastContext';
 import { getAcademicContexts } from '../../services/academicContextService';
 import { getCourses } from '../../services/courseService';
-import { getHODAllocations } from '../../services/hodAllocationService';
-import { solveTimetable } from '../../services/timetableService';
+import { getHODAllocations, validateCohortAllocations } from '../../services/hodAllocationService';
+import { generateFromContext, getDesignContext, getContextStatus } from '../../services/timetableService';
+import { describeError } from '../../services/api';
 import {
   RELEVANT_YEARS,
   YEAR_SEMESTER_MAP,
@@ -15,6 +16,7 @@ import {
   fetchAllCoursesForContext,
   deriveAutomaticCourseRows,
   calculateAssignmentPlanStatus,
+  resolveCourseFacultyDisplay,
 } from '../../services/coordinatorDesignService';
 
 import PageHeader from '../../components/common/PageHeader';
@@ -155,16 +157,19 @@ export default function OptimizationSolverPage() {
       setSelectedSemester(validSems[0]);
     }
     setGenerationSummary(null);
+    setContextStatus(null);
   };
 
   const handleSemesterChange = (sem) => {
     setSelectedSemester(sem);
     setGenerationSummary(null);
+    setContextStatus(null);
   };
 
   const handleSectionChange = (sec) => {
     setSelectedSection(sec);
     setGenerationSummary(null);
+    setContextStatus(null);
   };
 
   // Derive Automatic Course Rows & Synchronized Assignment Plan
@@ -176,6 +181,15 @@ export default function OptimizationSolverPage() {
     targetCurriculumSemester,
   });
 
+  // Pre-resolve multi-faculty display strings per course
+  const courseFacultyMap = useMemo(() => {
+    const map = {};
+    for (const row of courseRows) {
+      map[row.courseCode] = resolveCourseFacultyDisplay(hodAllocations, activeContextId, row.courseCode);
+    }
+    return map;
+  }, [courseRows, hodAllocations, activeContextId]);
+
   // Calculate Assignment Plan Status and Metrics
   const planStatus = calculateAssignmentPlanStatus(courseRows, {
     hasContext: Boolean(activeContextId || (selectedYear && selectedSemester && selectedSection)),
@@ -183,9 +197,105 @@ export default function OptimizationSolverPage() {
     error,
   });
 
-  // Trigger Timetable Generation
+  // Check for courses with HOD allocations but missing from the curriculum catalog
+  const catalogMissingRows = (() => {
+    if (!allCatalogCourses.length || baseLoading) return [];
+    const validCodes = new Set(
+      allCatalogCourses.map((c) => (c.courseCode || '').toUpperCase().trim()).filter(Boolean)
+    );
+    return courseRows.filter(
+      (r) => r.isAllocated && r.courseCode && !validCodes.has(r.courseCode.toUpperCase().trim())
+    );
+  })();
+
+  // Authoritative Design Context, Validation, & Context Lifecycle Stores (FE-P1-007, FE-P1-009, FE-P1-008)
+  const [designContext, setDesignContext] = useState(null);
+  const [cohortValidation, setCohortValidation] = useState(null);
+  const [contextStatus, setContextStatus] = useState(null);
+  const [validationLoading, setValidationLoading] = useState(false);
+
+  // Authoritative Design Context, Validation, and Context Status fetch
+  const loadDesignAndValidation = useCallback(async (ctxId, isCancelledCheck = () => false) => {
+    if (!ctxId) {
+      setDesignContext(null);
+      setCohortValidation(null);
+      setContextStatus(null);
+      return;
+    }
+    // Immediately clear previous context lifecycle state to prevent cross-context bleed
+    setContextStatus(null);
+
+    try {
+      setValidationLoading(true);
+      const [designRes, valRes, statusRes] = await Promise.allSettled([
+        getDesignContext(ctxId),
+        validateCohortAllocations(ctxId),
+        getContextStatus(ctxId),
+      ]);
+
+      if (isCancelledCheck()) return;
+
+      if (designRes.status === 'fulfilled' && designRes.value) {
+        const dVal = designRes.value?.data || designRes.value;
+        setDesignContext(dVal);
+        if (dVal?.courses && Array.isArray(dVal.courses) && dVal.courses.length > 0) {
+          setCurrentSemesterCourses(dVal.courses);
+        }
+      }
+      if (valRes.status === 'fulfilled' && valRes.value) {
+        const vVal = valRes.value?.data || valRes.value;
+        setCohortValidation(vVal);
+      }
+      if (statusRes.status === 'fulfilled' && statusRes.value) {
+        const sVal = statusRes.value?.data || statusRes.value;
+        setContextStatus(sVal);
+      }
+    } catch (err) {
+      console.warn('[OptimizationSolverPage] Design context load warning:', err);
+    } finally {
+      if (!isCancelledCheck()) {
+        setValidationLoading(false);
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    let isCancelled = false;
+    if (!baseLoading && activeContextId) {
+      setContextStatus(null);
+      loadDesignAndValidation(activeContextId, () => isCancelled);
+    } else if (!activeContextId) {
+      setDesignContext(null);
+      setCohortValidation(null);
+      setContextStatus(null);
+    }
+    return () => {
+      isCancelled = true;
+    };
+  }, [baseLoading, activeContextId, loadDesignAndValidation]);
+
+  const isGenerationReady = cohortValidation != null ? cohortValidation.readyForGeneration : planStatus.isReady;
+  const pendingAllocationCount = cohortValidation != null
+    ? Math.max(0, (cohortValidation.totalRequiredCourses || 0) - (cohortValidation.allocatedCount || 0))
+    : planStatus.pendingCount;
+
+  // Determine why the Generate button is disabled (for tooltip / label)
+  const generateButtonDisabledReason = (() => {
+    if (baseLoading || coursesLoading || validationLoading) return 'Loading curriculum and allocations…';
+    if (error) return 'Data load failed — refresh to retry';
+    if (!activeContextId) return 'No active academic context — create one first';
+    if (cohortValidation && !cohortValidation.readyForGeneration) {
+      return `HOD faculty allocation incomplete for ${pendingAllocationCount} course${pendingAllocationCount > 1 ? 's' : ''}`;
+    }
+    if (planStatus.totalCourses === 0) return 'No courses loaded for this cohort';
+    if (catalogMissingRows.length > 0) return `HOD allocation exists for ${catalogMissingRows.length} course${catalogMissingRows.length > 1 ? 's' : ''} not in curriculum catalog — register them first`;
+    if (planStatus.pendingCount > 0) return `HOD faculty allocation incomplete for ${planStatus.pendingCount} course${planStatus.pendingCount > 1 ? 's' : ''}`;
+    return null;
+  })();
+
+  // Trigger Timetable Generation using Authoritative Endpoint (FE-P1-006)
   const handleGenerateTimetable = async () => {
-    if (!planStatus.isReady) {
+    if (!isGenerationReady) {
       showToast('Faculty allocation is pending HOD decision for one or more courses.', 'warning');
       return;
     }
@@ -203,23 +313,11 @@ export default function OptimizationSolverPage() {
       setGenerationSummary(null);
       showToast(`Generating timetable for ${selectedYear} - Section ${selectedSection}...`, 'info');
 
-      // Build authoritative assignment plan payload for real solver
-      const assignmentPlan = courseRows
-        .filter((r) => r.facultyId && r.courseCode)
-        .map((r) => ({
-          courseCode: r.courseCode,
-          facultyId: r.facultyId,
-          type: r.type === 'LAB' ? 'LAB' : 'THEORY',
-          requiredPeriods: Number(r.requiredPeriods) || 3,
-        }));
-
-      const res = await solveTimetable({
-        academicContextId: activeContextId,
-        assignmentPlan,
-      });
+      // Authoritative generation from context: server re-derives courses, faculty, and periods
+      const res = await generateFromContext(activeContextId);
 
       const data = res?.data || res;
-      const version = data.timetableVersion || {};
+      const version = data.timetableVersion || data.version || {};
       const sessionsCreated = data.sessionsCreated ?? (data.assignments?.length || 0);
 
       setGenerationSummary({
@@ -228,17 +326,18 @@ export default function OptimizationSolverPage() {
         versionLabel: version.versionLabel || 'v1.0',
         academicContextId: activeContextId,
         academicContext: `${selectedYear} | ${targetCurriculumSemester} | Section ${selectedSection}`,
-        totalCourses: planStatus.totalCourses,
+        totalCourses: cohortValidation?.totalRequiredCourses || planStatus.totalCourses,
         theoryCourses: planStatus.theoryCount,
         labCourses: planStatus.labCount,
-        allocatedCourses: planStatus.allocatedCount,
+        allocatedCourses: cohortValidation?.allocatedCount || planStatus.allocatedCount,
         sessionsCreated,
         timestamp: new Date().toLocaleTimeString(),
       });
       showToast(`Timetable successfully generated (${sessionsCreated} sessions scheduled).`, 'success');
+      loadDesignAndValidation(activeContextId);
     } catch (err) {
-      console.error('[OptimizationSolverPage] solveTimetable error:', err);
-      const errMsg = err.message || 'Timetable generation failed.';
+      console.error('[OptimizationSolverPage] generateFromContext error:', err);
+      const errMsg = describeError(err, 'Timetable generation failed.');
       setGenerationError(errMsg);
       showToast(errMsg, 'error');
     } finally {
@@ -298,7 +397,14 @@ export default function OptimizationSolverPage() {
               </div>
               <div>
                 {activeContext ? (
-                  <Badge variant="success">COHORT RESOLVED: {activeContext.department || 'CSE'} - {activeContext.section}</Badge>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                    <Badge variant="success">COHORT RESOLVED: {activeContext.department || 'CSE'} - {activeContext.section}</Badge>
+                    {contextStatus?.state && (
+                      <Badge variant={contextStatus.state === 'PUBLISHED' ? 'success' : contextStatus.state === 'APPROVED' ? 'primary' : 'secondary'}>
+                        LIFECYCLE: {contextStatus.state}
+                      </Badge>
+                    )}
+                  </div>
                 ) : (
                   <Badge variant="warning">UNREGISTERED COHORT CONTEXT</Badge>
                 )}
@@ -413,6 +519,68 @@ export default function OptimizationSolverPage() {
                 {activeContextId ? `Context ID: ${activeContextId}` : 'No active context ID'}
               </div>
             </div>
+
+            {/* Authoritative Workflow Lifecycle Status (FE-P1-008) */}
+            {activeContext && contextStatus && (
+              <div
+                style={{
+                  marginTop: '12px',
+                  padding: '12px 16px',
+                  backgroundColor:
+                    contextStatus.state === 'APPROVED' || contextStatus.state === 'PUBLISHED'
+                      ? 'rgba(16, 185, 129, 0.08)'
+                      : contextStatus.state === 'PENDING_HOD_APPROVAL' || contextStatus.state === 'GENERATED'
+                      ? 'rgba(37, 99, 235, 0.08)'
+                      : contextStatus.state === 'REJECTED' || contextStatus.state === 'ALLOCATION_INCOMPLETE'
+                      ? 'rgba(234, 179, 8, 0.1)'
+                      : 'var(--color-surface-container-low)',
+                  borderRadius: 'var(--radius-md)',
+                  border: '1px solid var(--color-outline-variant)',
+                  fontSize: '0.8125rem',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  flexWrap: 'wrap',
+                  gap: '10px',
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span style={{ fontSize: '1rem' }}>
+                    {contextStatus.state === 'PUBLISHED' ? '🌐' : contextStatus.state === 'APPROVED' ? '✅' : contextStatus.state === 'PENDING_HOD_APPROVAL' ? '⏳' : '📋'}
+                  </span>
+                  <div>
+                    <span style={{ fontWeight: 700, color: 'var(--color-primary)' }}>
+                      Authoritative Lifecycle State: {contextStatus.state || 'TIMETABLE_NOT_GENERATED'}
+                    </span>
+                    {contextStatus.message && (
+                      <span style={{ marginLeft: '8px', color: 'var(--color-on-surface-variant)' }}>
+                        — {contextStatus.message}
+                      </span>
+                    )}
+                  </div>
+                </div>
+                {contextStatus.nextAction && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <span style={{ fontWeight: 600, color: 'var(--color-outline)' }}>Next Action:</span>
+                    <Badge variant="secondary">{contextStatus.nextAction}</Badge>
+                  </div>
+                )}
+              </div>
+            )}
+            {!activeContext && (
+              <div
+                style={{
+                  marginTop: '10px',
+                  padding: '8px 12px',
+                  backgroundColor: 'var(--color-warning-container)',
+                  color: 'var(--color-on-warning-container)',
+                  borderRadius: 'var(--radius-sm)',
+                  fontSize: '0.8125rem',
+                }}
+              >
+                ⚠️ No academic context registered for this cohort. Create one via <strong>Academic Context</strong> before generating the timetable.
+              </div>
+            )}
           </Card>
 
           {/* Assignment Plan & Course Rows Area */}
@@ -477,9 +645,9 @@ export default function OptimizationSolverPage() {
                 </div>
                 {planStatus.pendingCount > 0 && (
                   <div>
-                    <strong>Pending HOD Decision:</strong>{' '}
+                    <strong>Incomplete HOD Allocation:</strong>{' '}
                     <span style={{ color: 'var(--color-warning-dark)', fontWeight: 600 }}>
-                      {planStatus.pendingCount}
+                      {planStatus.pendingCount} course{planStatus.pendingCount > 1 ? 's' : ''} awaiting HOD decision
                     </span>
                   </div>
                 )}
@@ -487,6 +655,27 @@ export default function OptimizationSolverPage() {
             )}
 
             {/* User-facing State Alert Banner */}
+            {catalogMissingRows.length > 0 && (
+              <div
+                style={{
+                  padding: '14px 24px',
+                  backgroundColor: 'var(--color-warning-container)',
+                  borderBottom: '1px solid var(--color-warning)',
+                  color: 'var(--color-on-warning-container)',
+                  fontSize: '0.875rem',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '12px',
+                }}
+              >
+                <span style={{ fontSize: '1.25rem' }}>⚠️</span>
+                <div>
+                  <strong>Missing Curriculum Courses:</strong>{' '}
+                  {catalogMissingRows.length} course{catalogMissingRows.length > 1 ? 's' : ''} have HOD allocation but are not registered in the curriculum catalog ({catalogMissingRows.map((r) => r.courseCode).join(', ')}). These courses must be added via <strong>Regulation → Courses</strong> before timetable generation can proceed.
+                </div>
+              </div>
+            )}
+
             {planStatus.state === 'PARTIAL' && (
               <div
                 style={{
@@ -555,7 +744,7 @@ export default function OptimizationSolverPage() {
                     >
                       <th style={{ padding: '12px 16px', fontWeight: 600 }}>Course Code</th>
                       <th style={{ padding: '12px 16px', fontWeight: 600 }}>Course Title</th>
-                      <th style={{ padding: '12px 16px', fontWeight: 600 }}>Faculty</th>
+                      <th style={{ padding: '12px 16px', fontWeight: 600 }}>HOD Approved Faculty</th>
                       <th style={{ padding: '12px 16px', fontWeight: 600 }}>Type</th>
                       <th style={{ padding: '12px 16px', fontWeight: 600, textAlign: 'center' }}>
                         Required Periods
@@ -592,18 +781,26 @@ export default function OptimizationSolverPage() {
                             </span>
                           )}
                         </td>
-                        <td style={{ padding: '12px 16px' }}>
-                          {row.isAllocated ? (
+                        <td style={{ padding: '12px 16px', maxWidth: '280px' }}>
+                          {courseFacultyMap[row.courseCode]?.allocated ? (
                             <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-                              <span style={{ fontWeight: 600, color: 'var(--color-on-surface)' }}>
-                                {row.facultyName}
-                              </span>
-                              <span style={{ fontSize: '0.75rem', color: 'var(--color-outline)' }}>
-                                ID: {row.facultyId}
+                              {courseFacultyMap[row.courseCode].display.split('\n').map((line, i) => {
+                                const colonIdx = line.indexOf(':');
+                                return colonIdx > 0 ? (
+                                  <div key={i} style={{ display: 'flex', gap: '4px', alignItems: 'baseline' }}>
+                                    <span style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--color-outline)', textTransform: 'uppercase', flexShrink: 0 }}>{line.slice(0, colonIdx).trim()}:</span>
+                                    <span style={{ fontWeight: 600, color: 'var(--color-on-surface)', fontSize: '0.8125rem' }}>{line.slice(colonIdx + 1).trim()}</span>
+                                  </div>
+                                ) : (
+                                  <span key={i} style={{ fontWeight: 600, color: 'var(--color-on-surface)' }}>{line}</span>
+                                );
+                              })}
+                              <span style={{ fontSize: '0.6875rem', color: 'var(--color-outline)', fontStyle: 'italic' }}>
+                                Authoritative — HOD approved
                               </span>
                             </div>
                           ) : (
-                            <span style={{ color: 'var(--color-warning-dark)', fontWeight: 600 }}>
+                            <span style={{ color: 'var(--color-warning-dark)', fontWeight: 600, fontSize: '0.8125rem' }}>
                               [REQUIRES HOD DECISION]
                             </span>
                           )}
@@ -656,14 +853,15 @@ export default function OptimizationSolverPage() {
               <Button
                 variant="primary"
                 size="lg"
-                disabled={!planStatus.isReady || isGenerating}
+                disabled={!isGenerationReady || catalogMissingRows.length > 0 || isGenerating}
                 onClick={handleGenerateTimetable}
+                title={generateButtonDisabledReason || undefined}
               >
                 {isGenerating
                   ? 'Generating Timetable...'
-                  : planStatus.isReady
+                  : isGenerationReady && catalogMissingRows.length === 0
                   ? 'Generate Timetable'
-                  : 'Generate Timetable (Pending HOD Allocations)'}
+                  : `Generate Timetable — ${generateButtonDisabledReason}`}
               </Button>
             </div>
           </Card>

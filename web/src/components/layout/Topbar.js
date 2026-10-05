@@ -11,6 +11,25 @@ export default function Topbar({
   const { user, logout } = useAuth();
   const navigate = useNavigate();
   const { showToast } = useToast();
+  const [academicYearDisplay, setAcademicYearDisplay] = React.useState('ACADEMIC YEAR 2026–2027');
+
+  React.useEffect(() => {
+    let isCancelled = false;
+    import('../../services/academicContextService').then(({ getAcademicContexts }) => {
+      getAcademicContexts().then((res) => {
+        if (isCancelled) return;
+        const list = Array.isArray(res) ? res : res?.data || [];
+        if (list.length > 0) {
+          const first = list[0];
+          const yearStr = first.academicYearFrom && first.academicYearTo
+            ? `${first.academicYearFrom}–${first.academicYearTo}`
+            : first.academicYear || '2026–2027';
+          setAcademicYearDisplay(`ACADEMIC YEAR ${yearStr}`);
+        }
+      }).catch(() => {});
+    });
+    return () => { isCancelled = true; };
+  }, []);
 
   const handleLogout = () => {
     logout();
@@ -26,7 +45,7 @@ export default function Topbar({
   };
 
   const displayName = user?.name || 'Faculty Member';
-  const displayRole = user?.role || 'FACULTY';
+  const displayRole = user?.role === 'AC' ? 'TC' : (user?.role || 'FACULTY');
 
   return (
     <header className="ui-topbar">
@@ -45,9 +64,7 @@ export default function Topbar({
 
         <div className="ui-topbar-context">
           <span className="ui-topbar-pulse-dot" />
-          <span className="ui-topbar-context-detail">ODD SEMESTER 2024-25</span>
-          <span className="ui-topbar-context-detail" style={{ color: 'var(--color-outline-variant)' }}>•</span>
-          <span style={{ color: 'var(--color-secondary)', fontWeight: 600 }}>WEEK 11 (ACTIVE)</span>
+          <span className="ui-topbar-context-detail">{academicYearDisplay}</span>
           <span className="ui-topbar-context-detail" style={{ color: 'var(--color-outline-variant)' }}>•</span>
           <span className="ui-topbar-context-detail text-muted">CSE • R2022</span>
         </div>
@@ -66,13 +83,13 @@ export default function Topbar({
               Faculty
             </NavLink>
           )}
-          {(user?.role === 'AC' || user?.role === 'ADMIN') && (
+          {(user?.role === 'TC' || user?.role === 'AC' || user?.role === 'ADMIN') && (
             <NavLink
               to="/coordinator/dashboard"
               className="btn btn-subtle btn-sm"
               style={{ fontSize: '0.75rem', padding: '4px 8px' }}
             >
-              Coord
+              TC
             </NavLink>
           )}
           {(user?.role === 'HOD' || user?.role === 'ADMIN') && (

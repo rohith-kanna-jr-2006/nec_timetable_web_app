@@ -18,6 +18,8 @@ import AccessDenied from '../pages/common/AccessDenied';
 import FacultyDashboard from '../pages/faculty/FacultyDashboard';
 import ClassTimetablePage from '../pages/faculty/ClassTimetablePage';
 import FacultyTimetablePage from '../pages/faculty/FacultyTimetablePage';
+import MyTimetablePage from '../pages/faculty/MyTimetablePage';
+import WeeklyTimetablePage from '../pages/faculty/WeeklyTimetablePage';
 import FacultyWorkloadPage from '../pages/faculty/FacultyWorkloadPage';
 import FacultyAvailabilityPage from '../pages/faculty/FacultyAvailabilityPage';
 import FacultyAbsencePage from '../pages/faculty/FacultyAbsencePage';
@@ -68,14 +70,15 @@ export default function AppRoutes() {
           <Route index element={<Navigate to="/faculty/dashboard" replace />} />
           <Route path="dashboard" element={<FacultyDashboard />} />
           
-          {/* Exactly TWO distinct timetable views */}
+          {/* Timetable views */}
           <Route path="class-timetable" element={<ClassTimetablePage />} />
           <Route path="faculty-timetable" element={<FacultyTimetablePage />} />
+          <Route path="my-timetable" element={<MyTimetablePage />} />
+          <Route path="weekly-timetable" element={<WeeklyTimetablePage />} />
           
           {/* Backwards-compatible aliases */}
           <Route path="classes" element={<Navigate to="/faculty/class-timetable" replace />} />
-          <Route path="timetable" element={<Navigate to="/faculty/faculty-timetable" replace />} />
-          <Route path="weekly-timetable" element={<Navigate to="/faculty/class-timetable" replace />} />
+          <Route path="timetable" element={<Navigate to="/faculty/my-timetable" replace />} />
 
           <Route path="workload" element={<FacultyWorkloadPage />} />
           <Route path="availability" element={<FacultyAvailabilityPage />} />
@@ -85,8 +88,8 @@ export default function AppRoutes() {
         </Route>
       </Route>
 
-      {/* Protected Academic Coordinator routes (AC, ADMIN) */}
-      <Route element={<ProtectedRoute allowedRoles={['AC', 'ADMIN']} />}>
+      {/* Protected TimeTable Coordinator routes (TC, AC, ADMIN) */}
+      <Route element={<ProtectedRoute allowedRoles={['TC', 'AC', 'ADMIN']} />}>
         <Route path="/coordinator" element={<CoordinatorLayout />}>
           <Route index element={<Navigate to="/coordinator/dashboard" replace />} />
           <Route path="dashboard" element={<CoordinatorDashboard />} />

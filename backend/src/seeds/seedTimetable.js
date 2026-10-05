@@ -28,16 +28,22 @@ async function seedTimetable() {
 
   // Idempotently locate or create the baseline published version for III-A
   let version = await TimetableVersion.findOne({
-    academicYear: '2026-27',
-    semester: 'Odd Semester',
-    department: 'CSE',
-    year: 'III Year',
-    section: 'A',
-    status: 'PUBLISHED',
+    $or: [
+      { academicContextId: context._id, status: 'PUBLISHED' },
+      {
+        academicYear: '2026-27',
+        semester: 'Odd Semester',
+        department: 'CSE',
+        year: 'III Year',
+        section: 'A',
+        status: 'PUBLISHED',
+      },
+    ],
   });
 
   if (!version) {
     version = await TimetableVersion.create({
+      academicContextId: context._id,
       academicYear: '2026-27',
       semester: 'Odd Semester',
       department: 'CSE',
@@ -46,14 +52,17 @@ async function seedTimetable() {
       version: 1,
       versionLabel: 'v1.0 (Official Semester Rollout)',
       status: 'PUBLISHED',
-      generatedBy: 'Mr. R. Manikandan (AC)',
-      submittedBy: 'Mr. R. Manikandan (AC)',
+      generatedBy: 'Mr. R. Manikandan (TC)',
+      submittedBy: 'Mr. R. Manikandan (TC)',
       approvedBy: 'Dr. T. Rajasekaran (HOD)',
       approvedAt: new Date(),
       publishedAt: new Date(),
       hardConflicts: 0,
       totalScheduledPeriods: 35,
     });
+  } else if (!version.academicContextId) {
+    version.academicContextId = context._id;
+    await version.save();
   }
 
   // Safe idempotent reset: only replace sessions belonging to this specific context and version
@@ -366,34 +375,34 @@ async function seedTimetable() {
     {
       timetableVersionId: version._id,
       academicContextId: context._id,
-      courseCode: '22CSP04',
-      courseName: 'Algorithms Laboratory',
-      facultyId: 'FWL-06',
-      facultyName: 'Mrs. E. Padma',
+      courseCode: '22CSP09',
+      courseName: 'Full Stack Development Laboratory',
+      facultyId: 'FWL-14',
+      facultyName: 'Ms. D. Vinoparkavi',
       facultyAssignments: [
-        { facultyId: 'FWL-06', facultyName: 'Mrs. E. Padma', role: 'PRIMARY' },
-        { facultyId: 'FWL-12', facultyName: 'Mrs. K. Eswari', role: 'ADDITIONAL' },
+        { facultyId: 'FWL-14', facultyName: 'Ms. D. Vinoparkavi', role: 'PRIMARY' },
+        { facultyId: 'FWL-06', facultyName: 'Mrs. E. Padma', role: 'ADDITIONAL' },
       ],
       day: 'THU',
       period: 'P1',
-      room: 'Algorithms Lab',
+      room: 'Web Tech Lab',
       sessionType: 'LAB',
       duration: 2,
     },
     {
       timetableVersionId: version._id,
       academicContextId: context._id,
-      courseCode: '22CSP04',
-      courseName: 'Algorithms Laboratory',
-      facultyId: 'FWL-06',
-      facultyName: 'Mrs. E. Padma',
+      courseCode: '22CSP09',
+      courseName: 'Full Stack Development Laboratory',
+      facultyId: 'FWL-14',
+      facultyName: 'Ms. D. Vinoparkavi',
       facultyAssignments: [
-        { facultyId: 'FWL-06', facultyName: 'Mrs. E. Padma', role: 'PRIMARY' },
-        { facultyId: 'FWL-12', facultyName: 'Mrs. K. Eswari', role: 'ADDITIONAL' },
+        { facultyId: 'FWL-14', facultyName: 'Ms. D. Vinoparkavi', role: 'PRIMARY' },
+        { facultyId: 'FWL-06', facultyName: 'Mrs. E. Padma', role: 'ADDITIONAL' },
       ],
       day: 'THU',
       period: 'P2',
-      room: 'Algorithms Lab',
+      room: 'Web Tech Lab',
       sessionType: 'LAB',
       duration: 2,
     },
@@ -519,14 +528,20 @@ async function seedTimetable() {
     {
       timetableVersionId: version._id,
       academicContextId: context._id,
-      courseCode: '22CSP01',
-      courseName: 'Project Work Phase I',
+      courseCode: '22CSS03',
+      courseName: 'Project Based Learning (PBL)',
       facultyId: 'FWL-03',
       facultyName: 'Dr. S. Karpusamy',
       day: 'FRI',
       period: 'P5',
       room: 'LH-101',
-      sessionType: 'PBL',
+      // Co-curricular activity, classified like its 22CSS0x siblings
+      // (22CSS01 Library, 22CSS02 Sports). It is deliberately NOT 'PBL':
+      // this curriculum's Course master defines no PBL credit course, so
+      // 'PBL' would imply a credit-curriculum course that does not exist.
+      // 'OTHER' marks it as a non-credit institutional activity, which is
+      // what the integrity audit validates against the Course master.
+      sessionType: 'OTHER',
       duration: 1,
     },
     {
@@ -641,6 +656,12 @@ async function seedTimetable() {
     upsertedAllocs.push(doc);
   }
   console.log(`[Seed] Successfully seeded/updated ${upsertedAllocs.length} authoritative HOD faculty allocations.`);
+
+  // Purge any legacy/erroneous allocations for 22CSP01 or 22CSP04 under III Year
+  await HODFacultyAllocation.deleteMany({
+    academicContextId: context._id,
+    courseCode: { $in: ['22CSP01', '22CSP04'] },
+  });
 
   return { version, sessions: inserted, hodAllocations: upsertedAllocs };
 }

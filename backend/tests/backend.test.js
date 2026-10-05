@@ -610,10 +610,28 @@ async function runTests() {
     // ------------------------------------------------------------
     console.log('\n--- Test 17: Timetable Version State Machine ---');
     const ttVersion = await TimetableVersion.create({
+      academicContextId: contextId,
       academicYear: '2026-27',
       semester: 'Odd Semester',
       department: 'CSE',
       status: 'NO_TIMETABLE',
+    });
+
+    // Phase 12: the Phase 5 submission guard refuses a version that has no
+    // scheduled sessions, so this lifecycle fixture now seeds one session.
+    // Without it the GENERATED -> PENDING_HOD_APPROVAL transition can never
+    // succeed, which is correct domain behaviour but not what this test asserts.
+    await TimetableSession.create({
+      timetableVersionId: ttVersion._id,
+      academicContextId: contextId,
+      courseCode: '22CSC14',
+      courseName: 'Object Oriented Programming',
+      facultyId: 'FWL-04',
+      facultyName: 'Dr. A. Manchula',
+      day: 'MON',
+      period: 'P1',
+      room: 'LH-101',
+      sessionType: 'THEORY',
     });
 
     const v1 = await transitionTimetableStatus(ttVersion._id, 'GENERATED', { role: 'AC', name: 'AC User' });
@@ -796,6 +814,9 @@ async function runTests() {
       },
     });
     await TimetableSession.findByIdAndDelete(session._id);
+    // Phase 12: also remove the session seeded for the lifecycle version, which
+    // previously leaked one row per run.
+    await TimetableSession.deleteMany({ timetableVersionId: ttVersion._id });
     await TimetableVersion.findByIdAndDelete(ttVersion._id);
     await HODFacultyAllocation.findByIdAndDelete(allocation._id);
     await Notification.findByIdAndDelete(notif._id);

@@ -1,12 +1,16 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { useSearchParams, useNavigate } from 'react-router-dom';
 import { getAcademicContexts } from '../../services/academicContextService';
 import {
   getClassTimetable,
   getTimetableVersions,
+  getReviewMatrix,
   groupSessionsByDay,
+  getSessionFacultyList,
   calculateTimetableMetrics,
 } from '../../services/timetableService';
+import { submitTimetableForApproval } from '../../services/coordinatorService';
+import { useToast } from '../../context/ToastContext';
 import { WEEK_DAYS, PERIOD_TIMINGS } from '../../constants/schedule';
 import PageHeader from '../../components/common/PageHeader';
 import Card from '../../components/common/Card';
@@ -16,18 +20,104 @@ import Spinner from '../../components/common/Spinner';
 import ErrorState from '../../components/common/ErrorState';
 import EmptyState from '../../components/common/EmptyState';
 
+// TC Role name constant
+const TC_ROLE_NAME = 'TimeTable Coordinator (TC)';
+
+// ─── Session Cell Component ────────────────────────────────────────────────────
+function SessionCell({ session }) {
+  if (!session) {
+    return (
+      <td style={{ padding: '8px 4px', color: 'var(--color-outline)', backgroundColor: 'transparent', minWidth: '100px' }}>
+        <span style={{ opacity: 0.4 }}>—</span>
+      </td>
+    );
+  }
+
+  const isLab = session.sessionType === 'LAB';
+  const bgColor = isLab ? 'rgba(234, 179, 8, 0.07)' : 'rgba(37, 99, 235, 0.05)';
+  const borderColor = isLab ? 'rgba(234, 179, 8, 0.22)' : 'rgba(37, 99, 235, 0.18)';
+  const accentColor = isLab ? 'var(--color-warning)' : 'var(--color-primary)';
+  const facultyList = getSessionFacultyList(session);
+
+  return (
+    <td style={{ padding: '6px 4px', backgroundColor: bgColor }}>
+      <div style={{
+        padding: '7px 8px',
+        borderRadius: 'var(--radius-sm)',
+        border: `1px solid ${borderColor}`,
+        height: '100%',
+        minHeight: '90px',
+        display: 'flex',
+        flexDirection: 'column',
+        justifyContent: 'flex-start',
+        gap: '3px',
+      }}>
+        {/* Course Code */}
+        <div style={{ fontWeight: 800, fontSize: '0.75rem', color: accentColor, lineHeight: 1.2 }}>
+          {session.courseCode || 'N/A'}
+        </div>
+        {/* Course Name */}
+        <div style={{ fontSize: '0.7rem', fontWeight: 500, color: 'var(--color-on-surface)', lineHeight: 1.3, flexGrow: 1, overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>
+          {session.courseName || 'Unknown'}
+        </div>
+        {/* Room */}
+        <div style={{ fontSize: '0.65rem', color: 'var(--color-on-surface-variant)', marginTop: 'auto', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          📍 {session.room || 'TBD'}
+        </div>
+        {/* Faculty Assignments (all displayed in single cell, no duplicate cells) */}
+        <div style={{ fontSize: '0.65rem', color: 'var(--color-on-surface-variant)', display: 'flex', flexDirection: 'column', gap: '2px', marginTop: '2px' }}>
+          {facultyList.length > 0 ? (
+            facultyList.map((fa, faIdx) => (
+              <div
+                key={faIdx}
+                style={{ display: 'flex', alignItems: 'center', gap: '3px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}
+                title={`${fa.facultyName || fa.facultyId} (${fa.role || 'PRIMARY'})`}
+              >
+                <span style={{ fontSize: '0.6rem' }}>👤</span>
+                <span style={{ fontWeight: 600 }}>{fa.facultyName || fa.facultyId}</span>
+                {fa.role && fa.role !== 'PRIMARY' && (
+                  <span style={{
+                    fontSize: '0.55rem',
+                    padding: '1px 3px',
+                    borderRadius: '2px',
+                    backgroundColor: 'var(--color-surface-container-high)',
+                    color: 'var(--color-outline)',
+                    fontWeight: 700,
+                  }}>
+                    {fa.role}
+                  </span>
+                )}
+              </div>
+            ))
+          ) : (
+            <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              👤 Unassigned
+            </div>
+          )}
+        </div>
+      </div>
+    </td>
+  );
+}
+
 export default function TimetableReviewPage({ portalType = 'HOD' }) {
   const [searchParams, setSearchParams] = useSearchParams();
   const paramContextId = searchParams.get('academicContextId');
   const paramVersionId = searchParams.get('versionId');
+  const paramClassId = searchParams.get('classId');
 
+  const navigate = useNavigate();
+  const { showToast } = useToast();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [contexts, setContexts] = useState([]);
   const [selectedContextId, setSelectedContextId] = useState(paramContextId || '');
   const [versions, setVersions] = useState([]);
   const [selectedVersionId, setSelectedVersionId] = useState(paramVersionId || '');
+  const [selectedClassId, setSelectedClassId] = useState(paramClassId || '');
   const [sessions, setSessions] = useState([]);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [reviewSummary, setReviewSummary] = useState(null);
 
   // Load available academic contexts
   useEffect(() => {
@@ -38,7 +128,6 @@ export default function TimetableReviewPage({ portalType = 'HOD' }) {
         setContexts(list);
 
         if (list.length > 0) {
-          // If query param matches an existing context, retain it; otherwise select default
           if (paramContextId && list.some((c) => (c._id || c.id) === paramContextId)) {
             setSelectedContextId(paramContextId);
           } else if (!selectedContextId) {
@@ -53,23 +142,27 @@ export default function TimetableReviewPage({ portalType = 'HOD' }) {
     loadContexts();
   }, [paramContextId]);
 
-  // Load available timetable versions
-  useEffect(() => {
-    async function loadVersions() {
-      try {
-        const res = await getTimetableVersions();
-        const list = Array.isArray(res) ? res : res?.data || [];
-        setVersions(list);
+  // Load available timetable versions scoped by academic context
+  const loadVersions = useCallback(async () => {
+    try {
+      const params = selectedContextId ? { academicContextId: selectedContextId } : {};
+      const res = await getTimetableVersions(params);
+      const list = Array.isArray(res) ? res : res?.data || [];
+      setVersions(list);
 
-        if (paramVersionId && list.some((v) => (v._id || v.id) === paramVersionId)) {
-          setSelectedVersionId(paramVersionId);
-        }
-      } catch (err) {
-        console.warn('[TimetableReviewPage] Could not load timetable versions:', err);
+      if (paramVersionId && list.some((v) => (v._id || v.id) === paramVersionId)) {
+        setSelectedVersionId(paramVersionId);
+      } else if (list.length > 0 && !selectedVersionId) {
+        setSelectedVersionId(list[0]._id || list[0].id);
       }
+    } catch (err) {
+      console.warn('[TimetableReviewPage] Could not load timetable versions:', err);
     }
+  }, [selectedContextId, paramVersionId, selectedVersionId]);
+
+  useEffect(() => {
     loadVersions();
-  }, [paramVersionId]);
+  }, [selectedContextId]);
 
   // Sync state changes with URL query parameters
   const updateFilterParams = useCallback(
@@ -85,7 +178,8 @@ export default function TimetableReviewPage({ portalType = 'HOD' }) {
   const handleContextChange = (ctxId) => {
     setSelectedContextId(ctxId);
     setSessions([]);
-    updateFilterParams(ctxId, selectedVersionId);
+    setSelectedVersionId('');
+    updateFilterParams(ctxId, '');
   };
 
   const handleVersionChange = (verId) => {
@@ -94,49 +188,101 @@ export default function TimetableReviewPage({ portalType = 'HOD' }) {
     updateFilterParams(selectedContextId, verId);
   };
 
-  // Fetch schedule whenever selected cohort or version changes
-  const loadSchedule = useCallback(async () => {
-    if (!selectedContextId) return;
-    try {
-      setLoading(true);
-      setError(null);
-      const res = await getClassTimetable(selectedContextId, selectedVersionId || null);
-      const sessionList = res?.sessions || res?.data?.sessions || [];
-      setSessions(sessionList);
-    } catch (err) {
-      console.error('[TimetableReviewPage] Failed to fetch schedule:', err);
-      setError(err.message || 'Unable to load class timetable.');
-      setSessions([]);
-    } finally {
-      setLoading(false);
+  // Fetch schedule with stale-request prevention
+  useEffect(() => {
+    let isCancelled = false;
+
+    async function fetchTimetable() {
+      if (!selectedContextId) return;
+      try {
+        setLoading(true);
+        setError(null);
+        // Clear previous sessions immediately to prevent cross-context flicker
+        setSessions([]);
+
+        const [res, matrixRes] = await Promise.all([
+          getClassTimetable(selectedContextId, selectedVersionId || null),
+          getReviewMatrix({ academicContextId: selectedContextId, ...(selectedVersionId ? { versionId: selectedVersionId } : {}) }).catch(() => null),
+        ]);
+
+        if (!isCancelled) {
+          const sessionList = res?.sessions || res?.data?.sessions || [];
+          setSessions(sessionList);
+          if (matrixRes && matrixRes.summary) {
+            setReviewSummary(matrixRes.summary);
+          }
+        }
+      } catch (err) {
+        if (!isCancelled) {
+          console.error('[TimetableReviewPage] Failed to fetch schedule:', err);
+          setError(err.message || 'Unable to load class timetable.');
+          setSessions([]);
+        }
+      } finally {
+        if (!isCancelled) {
+          setLoading(false);
+        }
+      }
     }
+
+    fetchTimetable();
+
+    return () => {
+      isCancelled = true;
+    };
   }, [selectedContextId, selectedVersionId]);
 
-  useEffect(() => {
-    if (selectedContextId) {
-      loadSchedule();
+  const handleSubmitForApproval = async () => {
+    const targetVerId = selectedVersionId || (versions[0]?._id || versions[0]?.id);
+    if (!targetVerId) {
+      showToast('Please select a timetable version to submit for approval.', 'warning');
+      return;
     }
-  }, [selectedContextId, selectedVersionId, loadSchedule]);
+
+    try {
+      setIsSubmitting(true);
+      await submitTimetableForApproval(targetVerId);
+      showToast('Timetable successfully submitted for HOD approval!', 'success');
+      await loadVersions();
+    } catch (err) {
+      console.error('[TimetableReviewPage] Submit for approval failed:', err);
+      showToast(err.message || 'Failed to submit timetable for HOD approval.', 'error');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
 
   const activeCtx = contexts.find((c) => (c._id || c.id) === selectedContextId);
-  const activeVer = versions.find((v) => (v._id || v.id) === selectedVersionId);
+  const activeVer = versions.find((v) => (v._id || v.id) === selectedVersionId) || versions[0];
   const grouped = groupSessionsByDay(sessions);
   const metrics = calculateTimetableMetrics(sessions);
   const periods = ['P1', 'P2', 'P3', 'P4', 'P5', 'P6', 'P7'];
 
+  const displayDays = [...WEEK_DAYS];
+  if (grouped.SAT && grouped.SAT.length > 0) {
+    displayDays.push({ id: 'SAT', label: 'Sat', full: 'Saturday' });
+  }
+
   const isCoordinator = portalType === 'Coordinator';
-  const pageTitle = 'Class Timetable Review Matrix';
+  const isHOD = portalType === 'HOD';
+  const pageTitle = isHOD ? 'Class Timetable Review Matrix' : isCoordinator ? 'Timetable Review' : 'Timetable Review';
   const pageDescription = isCoordinator
     ? 'Review generated timetable sessions across Computer Science & Engineering classes before final publication.'
-    : 'Comprehensive master grid review across all Computer Science & Engineering classes before executive ratification.';
+    : isHOD
+    ? 'Comprehensive master grid review across all Computer Science & Engineering classes before executive ratification.'
+    : 'Review timetable sessions across Computer Science & Engineering classes.';
   const breadcrumbs = isCoordinator
     ? [
         { label: 'Coordinator Portal', path: '/coordinator/dashboard' },
         { label: 'Timetable Design', path: '/coordinator/design' },
         { label: 'Timetable Review' },
       ]
-    : [
+    : isHOD
+    ? [
         { label: 'HOD Portal', path: '/hod/dashboard' },
+        { label: 'Timetable Review' },
+      ]
+    : [
         { label: 'Timetable Review' },
       ];
 
@@ -212,10 +358,34 @@ export default function TimetableReviewPage({ portalType = 'HOD' }) {
               </div>
             )}
 
+            {isCoordinator && (
+              <>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  icon="⚡"
+                  onClick={() => navigate(`/coordinator/design?academicContextId=${selectedContextId}`)}
+                >
+                  Timetable Design
+                </Button>
+                {activeVer && (activeVer.status === 'GENERATED' || activeVer.status === 'DRAFT' || activeVer.status === 'REJECTED') && (
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    icon="📨"
+                    isLoading={isSubmitting}
+                    onClick={handleSubmitForApproval}
+                  >
+                    Submit to HOD
+                  </Button>
+                )}
+              </>
+            )}
+
             <Button variant="outline" size="sm" icon="🖨️" onClick={() => window.print()}>
               Print Grid
             </Button>
-            <Button variant="primary" size="sm" icon="🔄" onClick={loadSchedule}>
+            <Button variant="primary" size="sm" icon="🔄" onClick={() => loadVersions()}>
               Refresh
             </Button>
           </div>
@@ -237,7 +407,16 @@ export default function TimetableReviewPage({ portalType = 'HOD' }) {
           </div>
           <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
             <Badge variant="secondary">Total Scheduled: {sessions.length} Periods</Badge>
-            {activeVer && <Badge variant="neutral">Version: {activeVer.versionLabel || activeVer._id}</Badge>}
+            {activeVer && (
+              <Badge variant={activeVer.status === 'PUBLISHED' ? 'success' : activeVer.status === 'APPROVED' ? 'primary' : activeVer.status === 'PENDING_HOD_APPROVAL' ? 'warning' : 'neutral'}>
+                {activeVer.status || 'DRAFT'} ({activeVer.versionLabel || activeVer._id})
+              </Badge>
+            )}
+            {reviewSummary && (
+              <Badge variant="secondary">
+                Matrix Sessions: {reviewSummary.sessionCount || reviewSummary.totalSessions || sessions.length}
+              </Badge>
+            )}
             {metrics.hardConflicts > 0 ? (
               <Badge variant="error">{metrics.hardConflicts} Conflicts</Badge>
             ) : (
@@ -258,7 +437,7 @@ export default function TimetableReviewPage({ portalType = 'HOD' }) {
           </div>
         ) : error ? (
           <div style={{ padding: '24px' }}>
-            <ErrorState message={error} onRetry={loadSchedule} />
+            <ErrorState message={error} onRetry={() => loadVersions()} />
           </div>
         ) : sessions.length === 0 ? (
           <div style={{ padding: '32px' }}>
@@ -300,7 +479,7 @@ export default function TimetableReviewPage({ portalType = 'HOD' }) {
                 </tr>
               </thead>
               <tbody>
-                {WEEK_DAYS.map((day) => {
+                {displayDays.map((day) => {
                   const daySessions = grouped[day.id] || [];
                   const sessionMap = {};
                   daySessions.forEach((s) => {
@@ -322,72 +501,7 @@ export default function TimetableReviewPage({ portalType = 'HOD' }) {
                       </td>
                       {periods.map((period) => {
                         const s = sessionMap[period];
-                        if (!s) {
-                          return (
-                            <td
-                              key={period}
-                              style={{
-                                padding: '10px 4px',
-                                color: 'var(--color-outline)',
-                                backgroundColor: 'transparent',
-                              }}
-                            >
-                              —
-                            </td>
-                          );
-                        }
-
-                        const isLab = s.sessionType === 'LAB';
-                        return (
-                          <td
-                            key={period}
-                            style={{
-                              padding: '8px 4px',
-                              backgroundColor: isLab ? 'rgba(234, 179, 8, 0.08)' : 'rgba(37, 99, 235, 0.06)',
-                            }}
-                          >
-                            <div
-                              style={{
-                                padding: '6px',
-                                borderRadius: 'var(--radius-sm)',
-                                border: `1px solid ${
-                                  isLab ? 'rgba(234, 179, 8, 0.25)' : 'rgba(37, 99, 235, 0.2)'
-                                }`,
-                              }}
-                            >
-                              <div
-                                style={{
-                                  fontWeight: 700,
-                                  color: isLab ? 'var(--color-warning)' : 'var(--color-primary)',
-                                }}
-                              >
-                                {s.courseCode}
-                              </div>
-                              <div
-                                style={{
-                                  fontSize: '0.75rem',
-                                  fontWeight: 500,
-                                  marginTop: '2px',
-                                  overflow: 'hidden',
-                                  textOverflow: 'ellipsis',
-                                  whiteSpace: 'nowrap',
-                                }}
-                                title={s.courseName}
-                              >
-                                {s.courseName}
-                              </div>
-                              <div
-                                style={{
-                                  fontSize: '0.7rem',
-                                  color: 'var(--color-on-surface-variant)',
-                                  marginTop: '4px',
-                                }}
-                              >
-                                Room: {s.room || 'TBD'} • {s.facultyName ? `${s.facultyName} (${s.facultyId})` : s.facultyId}
-                              </div>
-                            </div>
-                          </td>
-                        );
+                        return <SessionCell key={period} session={s} />;
                       })}
                     </tr>
                   );

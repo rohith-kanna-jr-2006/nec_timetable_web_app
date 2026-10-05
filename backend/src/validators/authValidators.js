@@ -37,8 +37,8 @@ function validateRegister(req) {
     errors.push('Password must be at least 6 characters long');
   }
 
-  if (role && !['FACULTY', 'AC', 'HOD', 'ADMIN'].includes(role)) {
-    errors.push('Role must be one of: FACULTY, AC, HOD, ADMIN');
+  if (role && !['FACULTY', 'AC', 'TC', 'HOD', 'ADMIN'].includes(role)) {
+    errors.push('Role must be one of: FACULTY, TC, AC, HOD, ADMIN');
   }
 
   return errors;

@@ -60,15 +60,12 @@ export default function LabAllocationRow({
 
       <div className="ui-allocation-col">
         <Input
-          label="Hrs/Week"
+          label="Hrs/Week (Standard)"
           type="number"
-          min="0"
-          max="12"
-          step="1"
-          placeholder="4"
-          value={item.hours !== undefined && item.hours !== null ? item.hours : 4}
-          onChange={(e) => handleFieldChange('hours', e.target.value)}
-          error={error.hours}
+          readOnly
+          disabled
+          value={4}
+          helperText="4 hrs standard"
         />
       </div>
 

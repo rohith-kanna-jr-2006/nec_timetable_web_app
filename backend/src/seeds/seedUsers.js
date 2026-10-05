@@ -23,10 +23,22 @@ async function seedUsers() {
       isActive: true,
     },
     {
+      // Legacy AC account — kept for backward-compatibility during migration.
+      // After all client sessions using AC tokens expire, this account can be
+      // updated to role: 'TC'. Do NOT delete it — it maps to facultyId FWL-22.
       name: 'Mr. R. Manikandan',
       email: 'ac@nec.edu.in',
       passwordHash,
       role: 'AC',
+      facultyId: 'FWL-22',
+      isActive: true,
+    },
+    {
+      // TC account — canonical TimeTable Coordinator login (same faculty, new role).
+      name: 'Mr. R. Manikandan',
+      email: 'tc@nec.edu.in',
+      passwordHash,
+      role: 'TC',
       facultyId: 'FWL-22',
       isActive: true,
     },
@@ -59,8 +71,13 @@ async function seedUsers() {
       const desigLower = (f.designation || '').toLowerCase();
       let role = 'FACULTY';
       if (desigLower.includes('hod')) role = 'HOD';
-      else if ((f.responsibilities || []).some((r) => (r.role || '').toLowerCase().includes('academic coordinator'))) {
-        role = 'AC';
+      // Faculty with an 'academic coordinator' or 'timetable coordinator' responsibility
+      // are the TimeTable Coordinator (TC) — they hold timetable-design authority.
+      else if ((f.responsibilities || []).some((r) =>
+        (r.role || '').toLowerCase().includes('academic coordinator') ||
+        (r.role || '').toLowerCase().includes('timetable coordinator')
+      )) {
+        role = 'TC';
       }
 
       users.push({
@@ -75,9 +92,16 @@ async function seedUsers() {
     }
   }
 
-  await User.deleteMany({});
+  // Phase 12: reset ONLY the accounts this seed manages, never the whole
+  // collection. A global deleteMany({}) previously destroyed unrelated accounts
+  // (including every test fixture user), which made the seed itself a source of
+  // cross-suite contamination.
+  const managedEmails = users.map((u) => u.email);
+  const removed = await User.deleteMany({ email: { $in: managedEmails } });
   const inserted = await User.insertMany(users);
-  console.log(`[Seed] Successfully seeded ${inserted.length} development user accounts.`);
+  console.log(
+    `[Seed] Refreshed ${inserted.length} managed development user accounts (removed ${removed.count} stale copies).`
+  );
   return inserted;
 }
 

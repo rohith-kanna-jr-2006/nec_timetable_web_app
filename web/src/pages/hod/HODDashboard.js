@@ -82,7 +82,7 @@ export default function HODDashboard() {
           { label: 'HOD Portal', path: '/hod/dashboard' },
           { label: 'Executive Dashboard' },
         ]}
-        badge={<Badge variant="warning">HOD EXECUTIVE (L1)</Badge>}
+        badge={<Badge variant="warning">Head of Department (HOD)</Badge>}
         actions={
           <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
             <Button
@@ -373,7 +373,7 @@ export default function HODDashboard() {
                       Version {v.versionLabel || 'v1.0'} • {v.academicYear} ({v.semester})
                     </div>
                     <div style={{ fontSize: '0.75rem', color: 'var(--color-on-surface-variant)', marginTop: '2px' }}>
-                      Cohort: {v.year || 'All Years'} {v.section ? `'${v.section}'` : ''} • Submitted by: {v.generatedBy || 'AC'}
+                      Cohort: {v.year || 'All Years'} {v.section ? `'${v.section}'` : ''} • Submitted by: {v.generatedBy || 'TC'}
                     </div>
                   </div>
                   <Button

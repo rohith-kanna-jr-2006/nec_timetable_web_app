@@ -39,7 +39,7 @@ export default function FacultyProfilePage() {
     };
   }, []);
 
-  const facultyId = profile?.facultyId || user?.facultyId || 'FWL-03';
+  const facultyId = profile?.facultyId || user?.facultyId || null;
   const name = profile?.name || facultyDetail?.facultyName || user?.name || 'Faculty Member';
   const email = profile?.email || facultyDetail?.email || user?.email || '—';
   const role = profile?.role || user?.role || 'FACULTY';

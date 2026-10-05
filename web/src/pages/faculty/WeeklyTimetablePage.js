@@ -29,7 +29,7 @@ export default function WeeklyTimetablePage() {
   const [sessions, setSessions] = useState([]);
   const [selectedDayFilter, setSelectedDayFilter] = useState('ALL');
 
-  const [activeFacultyId, setActiveFacultyId] = useState(user?.facultyId || 'FWL-03');
+  const [activeFacultyId, setActiveFacultyId] = useState(user?.facultyId || null);
   const [activeFacultyName, setActiveFacultyName] = useState(user?.name || 'Dr. S. Karpusamy');
   const [allFaculty, setAllFaculty] = useState([]);
 
@@ -79,6 +79,11 @@ export default function WeeklyTimetablePage() {
   }, [selectedContextId]);
 
   const fetchMatrix = useCallback(async () => {
+    if (viewMode === 'FACULTY' && !activeFacultyId) {
+      setError('Faculty ID not available. Please log in again.');
+      setIsLoading(false);
+      return;
+    }
     setIsLoading(true);
     setError(null);
     try {
@@ -632,6 +637,15 @@ export default function WeeklyTimetablePage() {
             <span>📍 {session.room || 'LH-101'}</span>
             {session.duration > 1 && <span>Span: {session.duration}</span>}
           </div>
+          {Array.isArray(session.facultyAssignments) && session.facultyAssignments.length > 0 && (
+            <div style={{ fontSize: '0.65rem', color: 'var(--color-outline)', marginTop: '3px', display: 'flex', flexDirection: 'column', gap: '1px' }}>
+              {session.facultyAssignments.map((f, i) => (
+                <span key={i} title={`${f.facultyName || f.facultyId} (${f.role})`} style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                  👤 {f.facultyName || f.facultyId} {f.role && f.role !== 'PRIMARY' && `[${f.role}]`}
+                </span>
+              ))}
+            </div>
+          )}
         </div>
       </td>
     );

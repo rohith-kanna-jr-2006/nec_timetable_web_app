@@ -23,7 +23,11 @@ const userSchema = new mongoose.Schema(
     },
     role: {
       type: String,
-      enum: ['FACULTY', 'AC', 'HOD', 'ADMIN'],
+      // TC = TimeTable Coordinator (timetable-design authority)
+      // AC is retained temporarily for backward-compatibility during migration.
+      // Remove 'AC' from this enum only after all existing User documents
+      // have been migrated to 'TC' via the migrateACtoTC migration script.
+      enum: ['FACULTY', 'AC', 'TC', 'HOD', 'ADMIN'],
       default: 'FACULTY',
       required: true,
       index: true,
