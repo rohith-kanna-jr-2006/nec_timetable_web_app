@@ -56,6 +56,11 @@ const TimetableVersion = require('../src/models/TimetableVersion');
 const TimetableSession = require('../src/models/TimetableSession');
 const FacultyAvailability = require('../src/models/FacultyAvailability');
 const { seedFaculty } = require('../src/seeds/seedFaculty');
+// Phase 12: shared-state protection for suites that need controlled III-A state.
+const { snapshotSharedContext, restoreSharedContext } = require('./helpers/testIsolation');
+
+// Phase 12: canonical III-A state captured before this suite mutates it.
+let sharedSnapshot = null;
 const { seedTimetable } = require('../src/seeds/seedTimetable');
 
 // Solver Modules
@@ -232,6 +237,9 @@ async function runTimetableSolverTests() {
         { upsert: true }
       );
     }
+
+    // Phase 12: protect the canonical III-A state before this suite rewrites it.
+    sharedSnapshot = await snapshotSharedContext(ctxIII_A._id);
 
     // Set allocations for III Year A
     await HODFacultyAllocation.deleteMany({ academicContextId: ctxIII_A._id });
@@ -1010,6 +1018,15 @@ async function runTimetableSolverTests() {
       await seedTimetable();
     } catch (e) {
       // ignore seed reset error
+    }
+    // Phase 12: restore the canonical III-A rows captured at the start. This runs
+    // AFTER the legacy seed reset so the snapshot is authoritative: allocations,
+    // versions and sessions return to exactly the state found before this suite,
+    // so no later suite inherits this suite's hardcoded allocations.
+    try {
+      if (sharedSnapshot) await restoreSharedContext(sharedSnapshot);
+    } catch (e) {
+      console.error('Phase 12 shared-state restore failed:', e && e.message ? e.message : e);
     }
     await disconnectDB();
   }

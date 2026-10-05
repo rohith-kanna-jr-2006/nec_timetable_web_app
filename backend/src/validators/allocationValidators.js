@@ -33,6 +33,10 @@ function validateClassAdvisor(req) {
 
   if (!academicContextId) {
     errors.push('academicContextId is required');
+  } else if (!/^[a-fA-F0-9]{24}$/.test(String(academicContextId))) {
+    // Phase 8: a class advisor is scoped to an exact AcademicContext, so a
+    // malformed id must be refused here instead of reaching the service.
+    errors.push('academicContextId must be a valid ObjectId');
   }
 
   if (!facultyId || typeof facultyId !== 'string' || !facultyId.trim()) {

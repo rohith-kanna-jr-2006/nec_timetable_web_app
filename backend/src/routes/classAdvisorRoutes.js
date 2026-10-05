@@ -6,7 +6,9 @@ const { requireRole } = require('../middleware/roleMiddleware');
 const { validate } = require('../middleware/validateMiddleware');
 const { validateClassAdvisor } = require('../validators/allocationValidators');
 
-router.get('/', classAdvisorController.getAdvisors);
+// Phase 8: the read endpoint is authenticated like the write endpoints. It previously
+// exposed every advisor assignment to unauthenticated callers.
+router.get('/', authenticateUser, classAdvisorController.getAdvisors);
 router.post(
   '/',
   authenticateUser,

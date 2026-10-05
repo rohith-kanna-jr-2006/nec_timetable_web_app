@@ -37,4 +37,16 @@ const classAdvisorAssignmentSchema = new mongoose.Schema(
 
 classAdvisorAssignmentSchema.index({ academicContextId: 1, status: 1 });
 
+// Phase 8: the domain invariant is at most one ACTIVE advisor per AcademicContext.
+// A partial unique index enforces it at the database level so a concurrent write
+// cannot produce two active advisors, while INACTIVE history is unconstrained.
+classAdvisorAssignmentSchema.index(
+  { academicContextId: 1 },
+  {
+    unique: true,
+    name: 'active_advisor_per_context_idx',
+    partialFilterExpression: { status: 'ACTIVE' },
+  }
+);
+
 module.exports = mongoose.model('ClassAdvisorAssignment', classAdvisorAssignmentSchema);

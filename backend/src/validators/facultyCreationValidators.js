@@ -19,6 +19,114 @@ const {
   isValidResponsibilityRole,
   RESPONSIBILITY_MASTER_ROLES,
 } = require('../constants/responsibilityMaster');
+const { parseDateOfBirth } = require('../utils/facultyCredentials');
+
+/**
+ * Phase 9: the complete set of mutable Faculty Information fields.
+ * Everything else is protected and must never be written through the faculty
+ * edit endpoint (PUT /api/faculty/:facultyId).
+ */
+const FACULTY_EDITABLE_FIELDS = Object.freeze([
+  'facultyName',
+  'email',
+  'dateOfBirth',
+  'designation',
+  'phone',
+]);
+
+/**
+ * Phase 9: fields a caller may never write through the faculty edit endpoint.
+ *
+ * Rejection is explicit rather than silent, because silently dropping a protected
+ * field would hide an attempted privilege escalation from the caller.
+ */
+const FACULTY_PROTECTED_FIELDS = Object.freeze([
+  'facultyId',
+  'role',
+  'roles',
+  'department',
+  'password',
+  'passwordHash',
+  'isActive',
+  '_id',
+  '__v',
+  'createdAt',
+  'updatedAt',
+  'workload',
+  'workloadCalculation',
+  'teaching',
+  'responsibilities',
+  'allocations',
+  'calculatedTotalHours',
+  'calculatedTeachingHours',
+  'calculatedResponsibilityHours',
+  'sourceTotalHours',
+  'teachingLoad',
+  'summary',
+]);
+
+/**
+ * Builds the explicit update payload from an untrusted request body.
+ * Throws a structured error when a protected field is present.
+ */
+function buildFacultyUpdatePayload(body) {
+  const source = body && typeof body === 'object' ? body : {};
+
+  const attempted = FACULTY_PROTECTED_FIELDS.filter((f) =>
+    Object.prototype.hasOwnProperty.call(source, f)
+  );
+  if (attempted.length > 0) {
+    const err = new Error(
+      `Protected field(s) cannot be updated through the faculty edit endpoint: ${attempted.join(', ')}`
+    );
+    err.name = 'FacultyUpdateError';
+    err.code = 'PROTECTED_FIELD';
+    err.statusCode = 400;
+    err.details = { attempted, allowed: FACULTY_EDITABLE_FIELDS };
+    throw err;
+  }
+
+  const unknown = Object.keys(source).filter((k) => !FACULTY_EDITABLE_FIELDS.includes(k));
+  if (unknown.length > 0) {
+    const err = new Error(
+      `Field(s) not permitted in a faculty update: ${unknown.join(', ')}. Allowed: ${FACULTY_EDITABLE_FIELDS.join(', ')}`
+    );
+    err.name = 'FacultyUpdateError';
+    err.code = 'PROTECTED_FIELD';
+    err.statusCode = 400;
+    err.details = { attempted: unknown, allowed: FACULTY_EDITABLE_FIELDS };
+    throw err;
+  }
+
+  const update = {};
+  FACULTY_EDITABLE_FIELDS.forEach((field) => {
+    if (!Object.prototype.hasOwnProperty.call(source, field)) return;
+    let value = source[field];
+
+    if (field === 'dateOfBirth') {
+      if (value === null || value === '') {
+        update.dateOfBirth = null;
+      } else {
+        const parts = parseDateOfBirth(value);
+        if (!parts) {
+          const err = new Error('dateOfBirth must be a real calendar date in YYYY-MM-DD format');
+          err.name = 'FacultyUpdateError';
+          err.code = 'INVALID_DATE_OF_BIRTH';
+          err.statusCode = 400;
+          err.details = { dateOfBirth: value };
+          throw err;
+        }
+        update.dateOfBirth = new Date(Date.UTC(parts.year, parts.month - 1, parts.day));
+      }
+      return;
+    }
+
+    if (typeof value === 'string') value = value.trim();
+    update[field] = value;
+  });
+
+  return update;
+}
 
 /**
  * Validates the teaching allocation object across all categories.
@@ -209,6 +317,36 @@ function validateResponsibilitiesPayload(responsibilities) {
 }
 
 /**
+ * Validates an optional date of birth.
+ *
+ * Absent is valid (legacy faculty records have no DOB and none is invented).
+ * When present the value must be a real calendar date that is not in the future.
+ */
+function validateDateOfBirth(value, { required = false } = {}) {
+  const errors = [];
+
+  if (value === undefined || value === null || value === '') {
+    if (required) errors.push('dateOfBirth is required');
+    return errors;
+  }
+
+  const parts = parseDateOfBirth(value);
+  if (!parts) {
+    errors.push('dateOfBirth must be a real calendar date in YYYY-MM-DD format');
+    return errors;
+  }
+
+  const today = new Date();
+  const todayUtcMidnight = Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate());
+  const dobUtcMidnight = Date.UTC(parts.year, parts.month - 1, parts.day);
+  if (dobUtcMidnight > todayUtcMidnight) {
+    errors.push('dateOfBirth cannot be in the future');
+  }
+
+  return errors;
+}
+
+/**
  * Main validator for Faculty Creation and Workload payload.
  */
 function validateFacultyCreationPayload(req) {
@@ -239,14 +377,14 @@ function validateFacultyCreationPayload(req) {
     }
   }
 
-  if (body.dateOfBirth !== undefined && body.dateOfBirth !== null && body.dateOfBirth !== '') {
-    const dob = new Date(body.dateOfBirth);
-    if (isNaN(dob.getTime())) {
-      errors.push('dateOfBirth must be a valid date (YYYY-MM-DD)');
-    } else if (dob > new Date()) {
-      errors.push('dateOfBirth cannot be in the future');
+  if (body.phone !== undefined && body.phone !== null && body.phone !== '') {
+    if (typeof body.phone !== 'string' || !body.phone.trim()) {
+      errors.push('phone must be a valid string if provided');
     }
   }
+
+  // Phase 9: date of birth.
+  errors.push(...validateDateOfBirth(body.dateOfBirth));
 
   // 2. Teaching Validation (supports nested teaching or flat allocation properties)
   let teachingToValidate = body.teaching;
@@ -281,4 +419,8 @@ module.exports = {
   validateFacultyCreationPayload,
   validateTeachingPayload,
   validateResponsibilitiesPayload,
+  validateDateOfBirth,
+  buildFacultyUpdatePayload,
+  FACULTY_EDITABLE_FIELDS,
+  FACULTY_PROTECTED_FIELDS,
 };
