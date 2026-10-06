@@ -242,7 +242,7 @@ export default function CoordinatorDashboard() {
               }}
             >
               <span style={{ fontSize: '1.5rem' }}>👥</span>
-              <span style={{ fontSize: '0.8125rem', fontWeight: 600 }}>Faculty Pools</span>
+              <span style={{ fontSize: '0.8125rem', fontWeight: 600 }}>Course–Faculty Assignment</span>
             </button>
 
             <button

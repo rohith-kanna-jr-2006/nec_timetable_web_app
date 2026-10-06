@@ -21,9 +21,9 @@ export default function Sidebar({
             title: 'TIMETABLE OPERATIONS',
             items: [
               { label: 'Dashboard', path: '/coordinator/dashboard', icon: '📊' },
+              { label: 'Faculty & Course Allocation', path: '/coordinator/faculty-assignment', icon: '👥' },
               { label: 'Timetable Design', path: '/coordinator/design', icon: '⚡' },
               { label: 'Timetable View', path: '/coordinator/view', icon: '📅' },
-              { label: 'Faculty & Course Allocation', path: '/coordinator/faculty-assignment', icon: '👥' },
             ],
           },
           {
