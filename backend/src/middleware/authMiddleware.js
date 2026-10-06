@@ -67,6 +67,25 @@ async function authenticateUser(req, res, next) {
   }
 }
 
+/**
+ * Middleware to optionally authenticate requests using JWT Bearer token.
+ * If Authorization header is provided, verifies token and attaches req.user.
+ * If absent, leaves req.user = null and passes through to next middleware.
+ */
+async function optionalAuthenticateUser(req, res, next) {
+  try {
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !/^Bearer\s+/i.test(authHeader.trim())) {
+      req.user = null;
+      return next();
+    }
+    return authenticateUser(req, res, next);
+  } catch (error) {
+    next(error);
+  }
+}
+
 module.exports = {
   authenticateUser,
+  optionalAuthenticateUser,
 };
