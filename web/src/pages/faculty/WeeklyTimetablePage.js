@@ -3,13 +3,10 @@ import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
 import {
   getFacultyTimetable,
-  getClassTimetable,
   groupSessionsByDay,
   calculateTimetableMetrics,
 } from '../../services/timetableService';
-import { getFacultyList } from '../../services/facultyService';
-import { getAcademicContexts } from '../../services/academicContextService';
-import { WEEK_DAYS, PERIOD_TIMINGS } from '../../constants/schedule';
+import { WEEK_DAYS } from '../../constants/schedule';
 
 import PageHeader from '../../components/common/PageHeader';
 import Breadcrumbs from '../../components/layout/Breadcrumbs';
@@ -25,61 +22,14 @@ export default function WeeklyTimetablePage() {
 
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [viewMode, setViewMode] = useState('FACULTY'); // 'FACULTY' | 'CLASS'
   const [sessions, setSessions] = useState([]);
   const [selectedDayFilter, setSelectedDayFilter] = useState('ALL');
 
-  const [activeFacultyId, setActiveFacultyId] = useState(user?.facultyId || null);
-  const [activeFacultyName, setActiveFacultyName] = useState(user?.name || 'Dr. S. Karpusamy');
-  const [allFaculty, setAllFaculty] = useState([]);
-
-  // Academic contexts for Class View
-  const [academicContexts, setAcademicContexts] = useState([]);
-  const [selectedContextId, setSelectedContextId] = useState('');
-  const [selectedContextLabel, setSelectedContextLabel] = useState('');
-
-  // Fetch faculty list for switcher
-  useEffect(() => {
-    async function loadFaculty() {
-      try {
-        const res = await getFacultyList({ limit: 100 });
-        const list = res.items || res.data || (Array.isArray(res) ? res : []);
-        setAllFaculty(list);
-        if (user?.facultyId) {
-          const match = list.find((f) => f.facultyId === user.facultyId);
-          if (match) setActiveFacultyName(match.facultyName);
-        }
-      } catch (err) {
-        console.warn('Could not load faculty list for dropdown:', err.message);
-      }
-    }
-    loadFaculty();
-  }, [user]);
-
-  // Fetch academic contexts for class selector
-  useEffect(() => {
-    async function loadContexts() {
-      try {
-        const res = await getAcademicContexts();
-        const list = Array.isArray(res) ? res : res?.data || res?.items || [];
-        setAcademicContexts(list);
-        if (list.length > 0 && !selectedContextId) {
-          const defaultCtx =
-            list.find((c) => c.year === 'III Year' && c.section === 'A') || list[0];
-          setSelectedContextId(defaultCtx._id);
-          setSelectedContextLabel(
-            `${defaultCtx.department || 'CSE'} • ${defaultCtx.year} '${defaultCtx.section}'`
-          );
-        }
-      } catch (err) {
-        console.warn('Could not load academic contexts:', err.message);
-      }
-    }
-    loadContexts();
-  }, [selectedContextId]);
+  const facultyId = user?.facultyId || null;
+  const facultyName = user?.name || 'Authenticated Faculty';
 
   const fetchMatrix = useCallback(async () => {
-    if (viewMode === 'FACULTY' && !activeFacultyId) {
+    if (!facultyId) {
       setError('Faculty ID not available. Please log in again.');
       setIsLoading(false);
       return;
@@ -87,48 +37,19 @@ export default function WeeklyTimetablePage() {
     setIsLoading(true);
     setError(null);
     try {
-      if (viewMode === 'FACULTY') {
-        const data = await getFacultyTimetable(activeFacultyId);
-        setSessions(data.sessions || []);
-      } else {
-        if (selectedContextId) {
-          const data = await getClassTimetable(selectedContextId);
-          setSessions(data.sessions || []);
-        } else {
-          setSessions([]);
-        }
-      }
+      const data = await getFacultyTimetable(facultyId);
+      setSessions(data.sessions || []);
     } catch (err) {
       console.error('[WeeklyTimetable] Failed to load schedule:', err);
       setError(err.message || 'Unable to load weekly timetable matrix.');
     } finally {
       setIsLoading(false);
     }
-  }, [activeFacultyId, selectedContextId, viewMode]);
+  }, [facultyId]);
 
   useEffect(() => {
     fetchMatrix();
   }, [fetchMatrix]);
-
-  const handleFacultyChange = (e) => {
-    const selectedId = e.target.value;
-    setActiveFacultyId(selectedId);
-    const match = allFaculty.find((f) => f.facultyId === selectedId);
-    if (match) {
-      setActiveFacultyName(match.facultyName);
-    }
-  };
-
-  const handleContextChange = (e) => {
-    const ctxId = e.target.value;
-    setSelectedContextId(ctxId);
-    const match = academicContexts.find((c) => c._id === ctxId);
-    if (match) {
-      setSelectedContextLabel(
-        `${match.department || 'CSE'} • ${match.year} '${match.section}'`
-      );
-    }
-  };
 
   const handleRefresh = async () => {
     await fetchMatrix();
@@ -165,76 +86,11 @@ export default function WeeklyTimetablePage() {
         }
         badge={
           <Badge variant="primary">
-            {viewMode === 'FACULTY'
-              ? `${activeFacultyName} (${activeFacultyId})`
-              : (selectedContextLabel || 'CLASS TIMETABLE')}
+            {facultyName} ({facultyId})
           </Badge>
         }
         actions={
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-            {viewMode === 'FACULTY' ? (
-              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                <label htmlFor="weekly-faculty-select" style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--color-on-surface-variant)' }}>
-                  Faculty:
-                </label>
-                <select
-                  id="weekly-faculty-select"
-                  className="form-select form-select-sm"
-                  value={activeFacultyId}
-                  onChange={handleFacultyChange}
-                  style={{
-                    padding: '5px 10px',
-                    borderRadius: 'var(--radius-md)',
-                    border: '1px solid var(--color-outline-variant)',
-                    fontSize: '0.8rem',
-                    fontWeight: 600,
-                    color: 'var(--color-primary)',
-                    background: '#ffffff',
-                  }}
-                >
-                  {allFaculty.length > 0 ? (
-                    allFaculty.map((f) => (
-                      <option key={f.facultyId} value={f.facultyId}>
-                        {f.facultyId}: {f.facultyName}
-                      </option>
-                    ))
-                  ) : (
-                    <option value={activeFacultyId}>{activeFacultyName} ({activeFacultyId})</option>
-                  )}
-                </select>
-              </div>
-            ) : (
-              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                <label htmlFor="weekly-context-select" style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--color-on-surface-variant)' }}>
-                  Class:
-                </label>
-                <select
-                  id="weekly-context-select"
-                  className="form-select form-select-sm"
-                  value={selectedContextId}
-                  onChange={handleContextChange}
-                  style={{
-                    padding: '5px 10px',
-                    borderRadius: 'var(--radius-md)',
-                    border: '1px solid var(--color-outline-variant)',
-                    fontSize: '0.8rem',
-                    fontWeight: 600,
-                    color: 'var(--color-primary)',
-                    background: '#ffffff',
-                  }}
-                >
-                  {academicContexts.length > 0 ? (
-                    academicContexts.map((c) => (
-                      <option key={c._id} value={c._id}>
-                        {c.department || 'CSE'} - {c.year} &apos;{c.section}&apos; ({c.academicYear})
-                      </option>
-                    ))
-                  ) : (
-                    <option value="">No academic classes available</option>
-                  )}
-                </select>
-              </div>
-            )}
             <Button variant="outline" size="sm" icon="🖨️" onClick={handlePrint}>
               Print / Export Grid
             </Button>
@@ -245,77 +101,31 @@ export default function WeeklyTimetablePage() {
         }
       />
 
-      {/* Control Strip & Filter Bar */}
+      {/* Day Filter Bar */}
       <Card style={{ marginBottom: '20px', padding: '14px 16px' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '14px' }}>
-          {/* View Mode Toggle */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-            <span style={{ fontWeight: 600, fontSize: '0.8125rem', color: 'var(--color-on-surface-variant)' }}>
-              View:
-            </span>
-            <div style={{ display: 'inline-flex', padding: '2px', background: 'var(--color-surface-container-high)', borderRadius: 'var(--radius-md)' }}>
-              <button
-                type="button"
-                onClick={() => setViewMode('FACULTY')}
-                style={{
-                  padding: '6px 12px',
-                  borderRadius: 'var(--radius-sm)',
-                  border: 'none',
-                  fontSize: '0.8rem',
-                  fontWeight: viewMode === 'FACULTY' ? 700 : 500,
-                  background: viewMode === 'FACULTY' ? '#ffffff' : 'transparent',
-                  color: viewMode === 'FACULTY' ? 'var(--color-primary)' : 'var(--color-on-surface-variant)',
-                  cursor: 'pointer',
-                  boxShadow: viewMode === 'FACULTY' ? 'var(--shadow-sm)' : 'none',
-                }}
-              >
-                👤 Faculty View
-              </button>
-              <button
-                type="button"
-                onClick={() => setViewMode('CLASS')}
-                style={{
-                  padding: '6px 12px',
-                  borderRadius: 'var(--radius-sm)',
-                  border: 'none',
-                  fontSize: '0.8rem',
-                  fontWeight: viewMode === 'CLASS' ? 700 : 500,
-                  background: viewMode === 'CLASS' ? '#ffffff' : 'transparent',
-                  color: viewMode === 'CLASS' ? 'var(--color-primary)' : 'var(--color-on-surface-variant)',
-                  cursor: 'pointer',
-                  boxShadow: viewMode === 'CLASS' ? 'var(--shadow-sm)' : 'none',
-                }}
-              >
-                🏫 Class Master
-              </button>
-            </div>
-          </div>
-
-          {/* Day Filter Chips */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
-            <span style={{ fontWeight: 600, fontSize: '0.8125rem', color: 'var(--color-on-surface-variant)' }}>
-              Filter:
-            </span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+          <span style={{ fontWeight: 600, fontSize: '0.8125rem', color: 'var(--color-on-surface-variant)' }}>
+            Filter:
+          </span>
+          <button
+            type="button"
+            className={`btn ${selectedDayFilter === 'ALL' ? 'btn-primary' : 'btn-outline'} btn-sm`}
+            style={{ padding: '4px 10px', fontSize: '0.75rem' }}
+            onClick={() => setSelectedDayFilter('ALL')}
+          >
+            All Days
+          </button>
+          {WEEK_DAYS.map((d) => (
             <button
+              key={d.id}
               type="button"
-              className={`btn ${selectedDayFilter === 'ALL' ? 'btn-primary' : 'btn-outline'} btn-sm`}
+              className={`btn ${selectedDayFilter === d.id ? 'btn-primary' : 'btn-outline'} btn-sm`}
               style={{ padding: '4px 10px', fontSize: '0.75rem' }}
-              onClick={() => setSelectedDayFilter('ALL')}
+              onClick={() => setSelectedDayFilter(d.id)}
             >
-              All Days
+              {d.label}
             </button>
-            {WEEK_DAYS.map((d) => (
-              <button
-                key={d.id}
-                type="button"
-                className={`btn ${selectedDayFilter === d.id ? 'btn-primary' : 'btn-outline'} btn-sm`}
-                style={{ padding: '4px 10px', fontSize: '0.75rem' }}
-                onClick={() => setSelectedDayFilter(d.id)}
-              >
-                {d.label}
-              </button>
-            ))}
-          </div>
+          ))}
         </div>
       </Card>
 
