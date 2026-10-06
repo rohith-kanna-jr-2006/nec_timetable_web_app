@@ -49,3 +49,4 @@ screenshot*.jpeg
 # Backup and patch files
 *.patch
 *.bak
+scratch/validation/
