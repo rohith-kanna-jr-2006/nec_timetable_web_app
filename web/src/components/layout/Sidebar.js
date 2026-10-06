@@ -63,8 +63,6 @@ export default function Sidebar({
           {
             title: 'TIMETABLES',
             items: [
-              { label: 'Class Timetable', path: '/faculty/class-timetable', icon: '🏫' },
-              { label: 'Faculty Timetable', path: '/faculty/faculty-timetable', icon: '🗓️' },
               { label: 'My Timetable', path: '/faculty/my-timetable', icon: '👤' },
               { label: 'Weekly Grid Matrix', path: '/faculty/weekly-timetable', icon: '📅' },
             ],
