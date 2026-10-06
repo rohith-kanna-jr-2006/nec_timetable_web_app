@@ -18,6 +18,14 @@ import {
   calculateAssignmentPlanStatus,
   resolveCourseFacultyDisplay,
 } from '../../services/coordinatorDesignService';
+import {
+  isGenerationReadyForContext,
+  buildGenerationPayload,
+  normalizeGenerationResponse,
+  buildReviewUrl,
+  buildClassTimetableUrl,
+  buildGenerationErrorMessage,
+} from '../../services/timetableGenerationService';
 
 import PageHeader from '../../components/common/PageHeader';
 import Badge from '../../components/common/Badge';
@@ -358,7 +366,7 @@ export default function OptimizationSolverPage() {
       loadDesignAndValidation(activeContextId);
     } catch (err) {
       console.error('[OptimizationSolverPage] generateFromContext error:', err);
-      const errMsg = describeError(err, 'Timetable generation failed.');
+      const errMsg = buildGenerationErrorMessage(err);
       setGenerationError(errMsg);
       showToast(errMsg, 'error');
     } finally {
