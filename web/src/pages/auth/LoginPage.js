@@ -77,7 +77,7 @@ export default function LoginPage() {
             </label>
             <span className="text-xs text-muted">Click to autofill</span>
           </div>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 6 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 6 }}>
             <button
               type="button"
               className={`btn ${email === 'faculty@nec.edu.in' ? 'btn-primary' : 'btn-outline'} btn-sm`}
@@ -98,14 +98,6 @@ export default function LoginPage() {
               onClick={() => handleRolePreset('tc@nec.edu.in')}
             >
               TC
-            </button>
-            <button
-              type="button"
-              className={`btn ${email === 'ac@nec.edu.in' ? 'btn-secondary' : 'btn-outline'} btn-sm`}
-              style={{ fontSize: '0.75rem', padding: '6px 2px' }}
-              onClick={() => handleRolePreset('ac@nec.edu.in')}
-            >
-              Coord (AC)
             </button>
             <button
               type="button"

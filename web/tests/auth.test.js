@@ -54,7 +54,7 @@ async function runAuthTests() {
     // Run Client-side tests only
     const { getDefaultDashboard } = await import('../src/services/authService.js');
     assert(getDefaultDashboard('FACULTY') === '/faculty/dashboard', 'Role FACULTY maps to /faculty/dashboard');
-    assert(getDefaultDashboard('AC') === '/coordinator/dashboard', 'Role AC maps to /coordinator/dashboard');
+    assert(getDefaultDashboard('TC') === '/coordinator/dashboard', 'Role TC maps to /coordinator/dashboard');
     assert(getDefaultDashboard('HOD') === '/hod/dashboard', 'Role HOD maps to /hod/dashboard');
     assert(getDefaultDashboard('ADMIN') === '/hod/dashboard', 'Role ADMIN maps to /hod/dashboard');
 
@@ -85,21 +85,20 @@ async function runAuthTests() {
     assert(false, `Faculty login failed: ${err.message}`);
   }
 
-  // Test 3: Role 2 - Academic Coordinator Login
-  let acToken = null;
+  // Test 3: Role 2 - Timetable Coordinator (TC) Login
+  let tcToken = null;
   try {
     const res = await fetch(`${BASE_URL}/auth/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email: 'ac@nec.edu.in', password: 'Password123!' }),
+      body: JSON.stringify({ email: 'tc@nec.edu.in', password: 'Password123!' }),
     });
     const data = await res.json();
-    assert(res.status === 200, 'Academic Coordinator login HTTP 200 status');
-    assert(data.data?.user?.role === 'AC', 'AC user role is AC');
-    assert(data.data?.user?.facultyId === 'FWL-22', 'AC profile maps to FWL-22');
-    acToken = data.data?.token;
+    assert(res.status === 200, 'Timetable Coordinator (TC) login HTTP 200 status');
+    assert(data.data?.user?.role === 'TC', 'TC user role is TC');
+    tcToken = data.data?.token;
   } catch (err) {
-    assert(false, `AC login failed: ${err.message}`);
+    assert(false, `TC login failed: ${err.message}`);
   }
 
   // Test 4: Role 3 - HOD Login
@@ -192,19 +191,19 @@ async function runAuthTests() {
   }
 
   // Test 10: Role-Based Access Control on Protected Endpoints
-  // AC cannot approve HOD allocations (requires HOD or ADMIN)
+  // TC cannot approve HOD allocations (requires HOD or ADMIN)
   try {
-    const acForbiddenRes = await fetch(`${BASE_URL}/hod-allocations/6794d21234567890abcdef12/status`, {
+    const tcForbiddenRes = await fetch(`${BASE_URL}/hod-allocations/6794d21234567890abcdef12/status`, {
       method: 'PATCH',
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${acToken}`,
+        Authorization: `Bearer ${tcToken}`,
       },
       body: JSON.stringify({ status: 'APPROVED' }),
     });
-    assert(acForbiddenRes.status === 403, 'AC forbidden from HOD approval endpoint (HTTP 403)');
+    assert(tcForbiddenRes.status === 403, 'TC forbidden from HOD approval endpoint (HTTP 403)');
   } catch (err) {
-    assert(false, `RBAC AC test error: ${err.message}`);
+    assert(false, `RBAC TC test error: ${err.message}`);
   }
 
   // Faculty cannot delete faculty records (requires ADMIN)
@@ -221,7 +220,7 @@ async function runAuthTests() {
   // Test 11: Client-Side Default Dashboard Role Redirection Mapping
   const { getDefaultDashboard, login: clientLogin, logout: clientLogout, getStoredToken, getStoredUser } = await import('../src/services/authService.js');
   assert(getDefaultDashboard('FACULTY') === '/faculty/dashboard', 'Role FACULTY maps to /faculty/dashboard');
-  assert(getDefaultDashboard('AC') === '/coordinator/dashboard', 'Role AC maps to /coordinator/dashboard');
+  assert(getDefaultDashboard('TC') === '/coordinator/dashboard', 'Role TC maps to /coordinator/dashboard');
   assert(getDefaultDashboard('HOD') === '/hod/dashboard', 'Role HOD maps to /hod/dashboard');
   assert(getDefaultDashboard('ADMIN') === '/hod/dashboard', 'Role ADMIN maps to /hod/dashboard');
 
