@@ -625,20 +625,25 @@ async function createAllocation(req, res, next) {
         return errorResponse(res, `Faculty '${fac.facultyName}' (${facultyId}) is marked inactive`, 409, 'FACULTY_INACTIVE');
       }
 
-      validationResult = {
-        allocationRule: ALLOCATION_RULES.THEORY_SINGLE,
-        normalizedAssignments: [
-          {
-            facultyId: fac.facultyId,
-            facultyName: fac.facultyName,
-            role: 'THEORY',
-            required: true,
-            source: 'MANUAL',
-          },
-        ],
-        primaryFaculty: { facultyId: fac.facultyId, facultyName: fac.facultyName },
-        timetableMapping: { allowed: true, required: true, enabled: true },
-      };
+      validationResult = await validateAllocationPayload({
+        academicContext: context,
+        course: crs,
+        payload: {
+          facultyAssignments: [
+            {
+              facultyId: fac.facultyId,
+              role: 'THEORY',
+              source: 'MANUAL',
+            },
+          ],
+        },
+        existingAllocations: existingAllocs,
+      });
+
+      if (!validationResult.isValid) {
+        const err = validationResult.error;
+        return errorResponse(res, err.message, 400, err.code, err.details);
+      }
     }
 
     // Default status is APPROVED if created by HOD/ADMIN, else DRAFT
@@ -753,18 +758,40 @@ async function updateAllocation(req, res, next) {
       }
 
       if (facultyId) {
-        updateData.facultyId = facultyId;
-        updateData.facultyAssignments = [
-          {
-            facultyId,
-            facultyName: resolvedFacultyName || facultyId,
-            role: allocationType === 'LAB_PRIMARY' ? 'PRIMARY' : 'THEORY',
-            required: true,
-            source: 'MANUAL',
+        const otherAllocs = await HODFacultyAllocation.find({
+          academicContextId: context._id,
+          _id: { $ne: existingAlloc._id },
+          status: { $ne: 'REJECTED' },
+        });
+
+        const validation = await validateAllocationPayload({
+          academicContext: context,
+          course: course || { courseCode: existingAlloc.courseCode, isLab: false, courseType: 'THEORY' },
+          payload: {
+            facultyAssignments: [
+              {
+                facultyId,
+                role: allocationType === 'LAB_PRIMARY' ? 'PRIMARY' : 'THEORY',
+                source: 'MANUAL',
+              },
+            ],
           },
-        ];
+          existingAllocations: otherAllocs,
+        });
+
+        if (!validation.isValid) {
+          const err = validation.error;
+          return errorResponse(res, err.message, 400, err.code, err.details);
+        }
+
+        updateData.facultyId = facultyId;
+        updateData.facultyAssignments = validation.normalizedAssignments;
+        if (validation.primaryFaculty) {
+          updateData.facultyName = validation.primaryFaculty.facultyName;
+        }
+      } else if (resolvedFacultyName) {
+        updateData.facultyName = resolvedFacultyName;
       }
-      if (resolvedFacultyName) updateData.facultyName = resolvedFacultyName;
       if (allocationType) updateData.allocationType = allocationType;
       if (timetableMapping) updateData.timetableMapping = timetableMapping;
     }

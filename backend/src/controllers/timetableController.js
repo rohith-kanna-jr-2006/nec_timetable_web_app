@@ -372,6 +372,30 @@ async function getFacultyTimetable(req, res, next) {
     const { facultyId } = req.params;
     const { versionId } = req.query;
 
+    // Phase 9 / B9: Faculty Data-Scope Security
+    // If authenticated as FACULTY, enforce that the user can only view their own schedule.
+    if (req.user && req.user.role === 'FACULTY') {
+      const userFacultyId = (req.user.facultyId || '').toUpperCase();
+      const targetFacultyId = (facultyId || '').toUpperCase();
+      const userDocId = (req.user.id || req.user._id || '').toString();
+
+      let isAuthorized = (userFacultyId && userFacultyId === targetFacultyId) ||
+                         (userDocId && userDocId === facultyId);
+
+      if (!isAuthorized && facultyId.match(/^[0-9a-fA-F]{24}$/)) {
+        try {
+          const facDoc = await Faculty.findById(facultyId);
+          if (facDoc && facDoc.facultyId && facDoc.facultyId.toUpperCase() === userFacultyId) {
+            isAuthorized = true;
+          }
+        } catch (_) {}
+      }
+
+      if (!isAuthorized) {
+        return errorResponse(res, 'Access denied: Faculty members may only view their own timetable.', 403, 'FORBIDDEN');
+      }
+    }
+
     let version = null;
     if (versionId) {
       version = await TimetableVersion.findById(versionId);

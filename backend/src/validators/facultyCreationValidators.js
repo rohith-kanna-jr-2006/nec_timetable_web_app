@@ -198,11 +198,14 @@ function validateTeachingPayload(teaching) {
     }
   });
 
-  // PG / Honours / Minor: each assigned course = 1 equivalent hour/week
+  // PG / Honours / Minor: each assigned course = 1 equivalent hour/week, max 1 subject
   if (teaching.pg !== undefined && teaching.pg !== null) {
     if (!Array.isArray(teaching.pg)) {
       errors.push('teaching.pg must be an array');
     } else {
+      if (teaching.pg.length > 1) {
+        errors.push(`PG / Honours / PG-level course handling allows a maximum of 1 subject (received ${teaching.pg.length}). Second assignment must be rejected.`);
+      }
       teaching.pg.forEach((item, idx) => {
         const label = `PG course row ${idx + 1}`;
         if (!item || typeof item !== 'object') {
