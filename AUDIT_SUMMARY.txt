@@ -1,0 +1,68 @@
+F8-TC RECTIFICATION AUDIT - CURRENT STATE
+
+PHASE 1 - AUDIT: COMPLETE
+- Reviewed coordinator pages, services, backend APIs
+- Identified key gaps in implementation
+
+CURRENT IMPLEMENTATION STATUS:
+
+✅ WORKING:
+- CourseSelectionPage.js: Loads curriculum catalog with filters
+- FacultyAssignmentPage.js: 
+  - Loads HOD allocations, courses, faculty, contexts
+  - Filters courses by Year/Section cohort
+  - Shows assignment-count rules (UG max 2, PG max 1)
+  - Shows violation warnings when limits exceeded
+  - Uses deriveAutomaticCourseRows and validateAssignmentCounts
+- OptimizationSolverPage.js:
+  - TC dashboard with Year/Semester/Section selection
+  - Loads contexts, HOD allocations, catalog courses
+  - Derives automatic course rows with faculty resolution
+  - Shows readiness state (READY_FOR_GENERATION, etc.)
+  - Generation via POST /api/timetable/generate-from-context
+  - Uses resolveCourseFacultyDisplay and calculateAssignmentPlanStatus
+
+❌ MISSING/IMPLEMENTATION GAPS:
+
+1. FACULTY ELIGIBILITY ENFORCEMENT (Phase 3):
+   - Faculty dropdowns do NOT disappear when max reached
+   - Only shows warning banner, doesn't hide from future selections
+   - Need: Per-course faculty count tracking + dropdown filtering
+
+2. CONTEXT ISOLATION VERIFICATION (Phase 4):
+   - Not tested switching between contexts (e.g., III/V/A ↔ III/V/B)
+   - Need: Verify assignments remain scoped and isolated
+
+3. DUAL OUTPUT (Phase 8):
+   - After generation: only shows generation summary
+   - Missing: Class Advisor timetable AND Faculty/Proctor timetable views
+
+4. HOD REJECTION → TC REDESIGN (Phase 9):
+   - No workflow for TC to see HOD rejection remarks
+   - Missing: "Redesign / Revise" entry point
+   - Missing: Resubmit path after rejection
+
+5. PLAYWRIGHT VALIDATION (Phase 10):
+   - Zero browser validation evidence
+   - Required: All 5 viewport sizes (1280x720, 768x1024, 430x932, 390x844, 360x800)
+   - Required: 18 test flows (login → redesign/resubmit)
+
+BACKEND CONTRACTS AVAILABLE:
+- POST /api/timetable/generate-from-context (TC/ADMIN only)
+- PATCH /api/timetable/version/:id/status
+- GET /api/timetable/design-context/:academicContextId (readonly)
+- PUT /api/hod-allocations/context/:academicContextId/course/:courseCode
+- Faculty eligibility validation enforced on backend
+
+FILES MODIFIED:
+- web/src/pages/coordinator/OptimizationSolverPage.js: Fixed duplicated useState hook
+
+REMAINING WORK:
+1. Implement faculty limit-hiding in FacultyAssignmentPage.js
+2. Add context isolation verification/testing
+3. Add dual output display after generation
+4. Implement HOD rejection → TC redesign workflow
+5. Create and run Playwright tests for all viewport sizes and flows
+6. Run build and test suites
+
+All TC operational work must stay within HOD-established constraints - frontend implements assignment UI with proper eligibility enforcement.
