@@ -506,8 +506,94 @@ export function resolveCourseFacultyDisplay(allocations = [], academicContextId,
   };
 }
 
+/**
+ * Authoritative per-course assignment-count rules for R2022 CSE regulations.
+ * Limits are enforced per individual course (not per faculty).
+ *
+ * UG THEORY: max 2 faculty assignments per course
+ * UG LAB:   max 2 faculty assignments per course
+ * PG:       max 1 faculty assignment per course
+ */
+export const ASSIGNMENT_COUNT_RULES = {
+  UG_THEORY: { max: 2, label: 'UG Theory', description: 'Maximum 2 faculty assignments per UG Theory course.' },
+  UG_LAB: { max: 2, label: 'UG Lab', description: 'Maximum 2 faculty assignments per UG Lab course.' },
+  PG: { max: 1, label: 'PG', description: 'Maximum 1 faculty assignment per PG course.' },
+};
+
+/**
+ * Categorizes a course row into an assignment-count bucket using
+ * the authoritative course type metadata (no text heuristics).
+ * Returns one of: 'UG_THEORY', 'UG_LAB', 'PG', 'OTHER'.
+ */
+export function categorizeAssignmentRow(row) {
+  const type = String(row?.type || '').toUpperCase();
+
+  if (type === 'LAB') {
+    return 'UG_LAB';
+  }
+  if (type === 'PG') {
+    return 'PG';
+  }
+  if (type === 'THEORY' || type === 'MC' || type === 'ELECTIVE') {
+    return 'UG_THEORY';
+  }
+  return 'OTHER';
+}
+
+/**
+ * Validates course-scoped assignment counts against the authoritative limits.
+ * Inspects assignments belonging to each individual course only.
+ * A faculty may be assigned to multiple different courses without violation;
+ * only the per-course faculty count is checked.
+ *
+ * Expects rows with: courseCode, type, facultyId, courseTitle
+ * Returns a list of violation objects (empty when compliant).
+ */
+export function validateAssignmentCounts(rows = []) {
+  const violations = [];
+
+  // Group assignments by course (courseCode + type), then count faculty per course
+  const courseGroups = {};
+
+  for (const row of rows) {
+    if (!row?.courseCode) continue;
+    if (!row?.facultyId) continue;
+
+    const bucket = categorizeAssignmentRow(row);
+    const key = String(row.courseCode);
+
+    if (!courseGroups[key]) {
+      courseGroups[key] = { bucket, courseCode: row.courseCode, courseTitle: row.courseTitle || '', assignments: [] };
+    }
+    courseGroups[key].assignments.push({ facultyId: row.facultyId });
+  }
+
+  for (const { bucket, courseCode, courseTitle, assignments } of Object.values(courseGroups)) {
+    const rule = ASSIGNMENT_COUNT_RULES[bucket];
+    if (!rule) continue;
+
+    const count = assignments.length;
+    if (count > rule.max) {
+      violations.push({
+        courseCode,
+        courseTitle,
+        bucket,
+        count,
+        max: rule.max,
+        label: rule.label,
+        message: `${rule.label} limit exceeded for ${courseCode}: ${count} faculty assigned (max ${rule.max}).`,
+      });
+    }
+  }
+
+  return violations;
+}
+
 export default {
   DEFAULT_ELECTIVE_SLOT_MAP,
+  ASSIGNMENT_COUNT_RULES,
+  categorizeAssignmentRow,
+  validateAssignmentCounts,
   fetchAllCoursesForContext,
   normalizeCourseCode,
   normalizeContextId,

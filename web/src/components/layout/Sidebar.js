@@ -21,9 +21,9 @@ export default function Sidebar({
             title: 'TIMETABLE OPERATIONS',
             items: [
               { label: 'Dashboard', path: '/coordinator/dashboard', icon: '📊' },
+              { label: 'Faculty & Course Allocation', path: '/coordinator/faculty-assignment', icon: '👥' },
               { label: 'Timetable Design', path: '/coordinator/design', icon: '⚡' },
               { label: 'Timetable View', path: '/coordinator/view', icon: '📅' },
-              { label: 'Faculty & Course Allocation', path: '/coordinator/faculty-assignment', icon: '👥' },
             ],
           },
           {
@@ -63,8 +63,6 @@ export default function Sidebar({
           {
             title: 'TIMETABLES',
             items: [
-              { label: 'Class Timetable', path: '/faculty/class-timetable', icon: '🏫' },
-              { label: 'Faculty Timetable', path: '/faculty/faculty-timetable', icon: '🗓️' },
               { label: 'My Timetable', path: '/faculty/my-timetable', icon: '👤' },
               { label: 'Weekly Grid Matrix', path: '/faculty/weekly-timetable', icon: '📅' },
             ],

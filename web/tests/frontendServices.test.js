@@ -47,7 +47,7 @@ async function runFrontendServiceTests() {
 
   assert(typeof getDefaultDashboard === 'function', 'getDefaultDashboard is exported function');
   assert(getDefaultDashboard('FACULTY') === '/faculty/dashboard', 'FACULTY dashboard is /faculty/dashboard');
-  assert(getDefaultDashboard('AC') === '/coordinator/dashboard', 'AC dashboard is /coordinator/dashboard');
+  assert(getDefaultDashboard('TC') === '/coordinator/dashboard', 'TC dashboard is /coordinator/dashboard');
   assert(getDefaultDashboard('HOD') === '/hod/dashboard', 'HOD dashboard is /hod/dashboard');
   assert(getDefaultDashboard('ADMIN') === '/hod/dashboard', 'ADMIN dashboard is /hod/dashboard');
   assert(getDefaultDashboard('UNKNOWN') === '/faculty/dashboard', 'Default fallback dashboard is /faculty/dashboard');

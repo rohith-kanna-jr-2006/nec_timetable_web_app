@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useToast } from '../../context/ToastContext';
 import { getAcademicContexts } from '../../services/academicContextService';
 import { getCourses } from '../../services/courseService';
-import { getHODAllocations, validateCohortAllocations } from '../../services/hodAllocationService';
+import { getHODAllocations, validateCohortAllocations, transitionTimetableVersion } from '../../services/hodAllocationService';
 import { generateFromContext, getDesignContext, getContextStatus } from '../../services/timetableService';
 import { describeError } from '../../services/api';
 import {
@@ -18,6 +18,14 @@ import {
   calculateAssignmentPlanStatus,
   resolveCourseFacultyDisplay,
 } from '../../services/coordinatorDesignService';
+import {
+  isGenerationReadyForContext,
+  buildGenerationPayload,
+  normalizeGenerationResponse,
+  buildReviewUrl,
+  buildClassTimetableUrl,
+  buildGenerationErrorMessage,
+} from '../../services/timetableGenerationService';
 
 import PageHeader from '../../components/common/PageHeader';
 import Badge from '../../components/common/Badge';
@@ -51,6 +59,9 @@ export default function OptimizationSolverPage() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [generationSummary, setGenerationSummary] = useState(null);
   const [generationError, setGenerationError] = useState(null);
+  // Submission Action State
+  const [submitError, setSubmitError] = useState(null);
+  const [submittingVersionId, setSubmittingVersionId] = useState(null);
 
   // Load initial base data (contexts, all allocations, catalog overview)
   const loadBaseEnvironment = useCallback(async () => {
@@ -358,11 +369,37 @@ export default function OptimizationSolverPage() {
       loadDesignAndValidation(activeContextId);
     } catch (err) {
       console.error('[OptimizationSolverPage] generateFromContext error:', err);
-      const errMsg = describeError(err, 'Timetable generation failed.');
+      const errMsg = buildGenerationErrorMessage(err);
       setGenerationError(errMsg);
       showToast(errMsg, 'error');
     } finally {
       setIsGenerating(false);
+    }
+  };
+
+  // Submit Generated Timetable for HOD Approval
+  const handleSubmitForApproval = async (versionId) => {
+    if (!versionId) {
+      showToast('No timetable version available to submit.', 'error');
+      return;
+    }
+
+    try {
+      setSubmittingVersionId(versionId);
+      setSubmitError(null);
+      await transitionTimetableVersion(versionId, 'PENDING_HOD_APPROVAL');
+      showToast('Timetable version submitted successfully for HOD approval.', 'success');
+
+      // Refresh context status to reflect new state
+      if (activeContextId) {
+        loadDesignAndValidation(activeContextId);
+      }
+    } catch (err) {
+      console.error('[OptimizationSolverPage] Submission failed:', err);
+      setSubmitError(err.message || 'Failed to submit timetable version for approval.');
+      showToast(err.message || 'Submission failed. Please try again.', 'error');
+    } finally {
+      setSubmittingVersionId(null);
     }
   };
 
@@ -975,7 +1012,31 @@ export default function OptimizationSolverPage() {
                 >
                   View Class Timetable 📅
                 </Button>
+                <Button
+                  variant="primary"
+                  size="md"
+                  onClick={() => handleSubmitForApproval(generationSummary.versionId)}
+                  disabled={submittingVersionId === generationSummary.versionId}
+                >
+                  {submittingVersionId === generationSummary.versionId ? 'Submitting...' : 'Submit for HOD Approval'}
+                </Button>
               </div>
+            </Card>
+          )}
+
+          {/* Submission Status Area */}
+          {submitError && (
+            <Card style={{ padding: '20px', marginTop: '20px', borderLeft: '4px solid var(--color-error)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px', color: 'var(--color-error)', marginBottom: '8px' }}>
+                <span style={{ fontSize: '1.25rem' }}>❌</span>
+                <h3 style={{ margin: 0, fontSize: '1.0625rem' }}>Submission Failed</h3>
+              </div>
+              <p style={{ margin: '0 0 12px 0', fontSize: '0.875rem', color: 'var(--color-on-surface)' }}>
+                {submitError}
+              </p>
+              <Button variant="outline" size="sm" onClick={() => setSubmitError(null)}>
+                Dismiss
+              </Button>
             </Card>
           )}
         </div>

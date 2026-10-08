@@ -62,6 +62,9 @@ async function runTests() {
     resolveAuthoritativeHODFaculty,
     deriveAutomaticCourseRows,
     calculateAssignmentPlanStatus,
+    validateAssignmentCounts,
+    categorizeAssignmentRow,
+    ASSIGNMENT_COUNT_RULES,
   } = designModule;
 
   // --- 1. Year Selection ---
@@ -289,7 +292,107 @@ async function runTests() {
   assert(errorStatus.state === 'ERROR', 'Error condition produces state: ERROR');
   assert(errorStatus.userMessage === 'Service Unavailable', 'Error message is properly exposed');
 
-  // --- 17. No Duplicate Automatic Rows ---
+  // --- 17. Assignment-Count Rule Validation (COURSE-SCOPED) ---
+  console.log('\n--- 17. Assignment-Count Rule Validation Tests ---');
+
+  // UG Theory course with 2 faculty assignments: VALID
+  const theoryTwoFaculty = [
+    { courseCode: 'CS101', courseTitle: 'Compiler Design', type: 'THEORY', requiredPeriods: 4, facultyId: 'FWL-01', status: 'HOD ALLOCATED', isAllocated: true },
+    { courseCode: 'CS101', courseTitle: 'Compiler Design', type: 'THEORY', requiredPeriods: 4, facultyId: 'FWL-02', status: 'HOD ALLOCATED', isAllocated: true },
+  ];
+  const theoryTwoViolations = validateAssignmentCounts(theoryTwoFaculty);
+  assert(theoryTwoViolations.length === 0, 'UG Theory 2 faculty assignments: PASS');
+
+  // UG Theory course with 3 faculty assignments: FAIL
+  const theoryThreeFaculty = [
+    { courseCode: 'CS101', courseTitle: 'Compiler Design', type: 'THEORY', requiredPeriods: 4, facultyId: 'FWL-01', status: 'HOD ALLOCATED', isAllocated: true },
+    { courseCode: 'CS101', courseTitle: 'Compiler Design', type: 'THEORY', requiredPeriods: 4, facultyId: 'FWL-02', status: 'HOD ALLOCATED', isAllocated: true },
+    { courseCode: 'CS101', courseTitle: 'Compiler Design', type: 'THEORY', requiredPeriods: 4, facultyId: 'FWL-03', status: 'HOD ALLOCATED', isAllocated: true },
+  ];
+  const theoryThreeViolations = validateAssignmentCounts(theoryThreeFaculty);
+  assert(theoryThreeViolations.some((v) => v.bucket === 'UG_THEORY' && v.count === 3 && v.max === 2), 'UG Theory 3 faculty assignments: FAIL');
+
+  // UG Lab course with 2 faculty assignments: PASS
+  const labTwoFaculty = [
+    { courseCode: 'CS201L', courseTitle: 'DS Lab', type: 'LAB', requiredPeriods: 4, facultyId: 'FWL-03', status: 'HOD ALLOCATED', isAllocated: true },
+    { courseCode: 'CS201L', courseTitle: 'DS Lab', type: 'LAB', requiredPeriods: 4, facultyId: 'FWL-04', status: 'HOD ALLOCATED', isAllocated: true },
+  ];
+  const labTwoViolations = validateAssignmentCounts(labTwoFaculty);
+  assert(labTwoViolations.length === 0, 'UG Lab 2 faculty assignments: PASS');
+
+  // UG Lab course with 3 faculty assignments: FAIL
+  const labThreeFaculty = [
+    { courseCode: 'CS201L', courseTitle: 'DS Lab', type: 'LAB', requiredPeriods: 4, facultyId: 'FWL-03', status: 'HOD ALLOCATED', isAllocated: true },
+    { courseCode: 'CS201L', courseTitle: 'DS Lab', type: 'LAB', requiredPeriods: 4, facultyId: 'FWL-04', status: 'HOD ALLOCATED', isAllocated: true },
+    { courseCode: 'CS201L', courseTitle: 'DS Lab', type: 'LAB', requiredPeriods: 4, facultyId: 'FWL-05', status: 'HOD ALLOCATED', isAllocated: true },
+  ];
+  const labThreeViolations = validateAssignmentCounts(labThreeFaculty);
+  assert(labThreeViolations.some((v) => v.bucket === 'UG_LAB' && v.count === 3 && v.max === 2), 'UG Lab 3 faculty assignments: FAIL');
+
+  // PG course with 1 faculty assignment: PASS
+  const pgOneFaculty = [
+    { courseCode: 'PG501', courseTitle: 'Advanced AI', type: 'PG', requiredPeriods: 3, facultyId: 'FWL-07', status: 'HOD ALLOCATED', isAllocated: true },
+  ];
+  const pgOneViolations = validateAssignmentCounts(pgOneFaculty);
+  assert(pgOneViolations.length === 0, 'PG 1 faculty assignment: PASS');
+
+  // PG course with 2 faculty assignments: FAIL
+  const pgTwoFaculty = [
+    { courseCode: 'PG501', courseTitle: 'Advanced AI', type: 'PG', requiredPeriods: 3, facultyId: 'FWL-07', status: 'HOD ALLOCATED', isAllocated: true },
+    { courseCode: 'PG501', courseTitle: 'Advanced AI', type: 'PG', requiredPeriods: 3, facultyId: 'FWL-08', status: 'HOD ALLOCATED', isAllocated: true },
+  ];
+  const pgTwoViolations = validateAssignmentCounts(pgTwoFaculty);
+  assert(pgTwoViolations.some((v) => v.bucket === 'PG' && v.count === 2 && v.max === 1), 'PG 2 faculty assignments: FAIL');
+
+  // Multiple different courses assigned to the same faculty: MUST NOT violate
+  const multiCourseSameFaculty = [
+    { courseCode: 'CS101', courseTitle: 'Compiler Design', type: 'THEORY', requiredPeriods: 4, facultyId: 'FWL-01', status: 'HOD ALLOCATED', isAllocated: true },
+    { courseCode: 'CS102', courseTitle: 'OOP', type: 'THEORY', requiredPeriods: 3, facultyId: 'FWL-01', status: 'HOD ALLOCATED', isAllocated: true },
+    { courseCode: 'CS201L', courseTitle: 'DS Lab', type: 'LAB', requiredPeriods: 4, facultyId: 'FWL-01', status: 'HOD ALLOCATED', isAllocated: true },
+  ];
+  const multiCourseViolations = validateAssignmentCounts(multiCourseSameFaculty);
+  assert(multiCourseViolations.length === 0, 'Multiple different courses on same faculty must NOT create a violation');
+
+  // categorizeAssignmentRow bucket mapping (uses type metadata only)
+  assert(categorizeAssignmentRow({ type: 'THEORY', courseCode: 'CS101' }) === 'UG_THEORY', 'THEORY maps to UG_THEORY bucket');
+  assert(categorizeAssignmentRow({ type: 'LAB', courseCode: 'CS101L' }) === 'UG_LAB', 'LAB maps to UG_LAB bucket');
+  assert(categorizeAssignmentRow({ type: 'PG', courseCode: 'CS701' }) === 'PG', 'PG maps to PG bucket');
+
+  // --- 18. Academic Context Binding (Stale Data Not Reused) ---
+  console.log('\n--- 18. Academic Context Binding Tests ---');
+  // Rows must be derived ONLY from the active academic context, not stale/other contexts
+  const staleContextAllocations = [
+    { academicContextId: 'ctx_OLD', courseCode: '22CSC14', facultyId: 'FWL-99', status: 'APPROVED' },
+    { academicContextId: 'ctx_3_a', courseCode: '22CSC15', facultyId: 'FWL-04', status: 'APPROVED' },
+  ];
+  const contextBoundRows = deriveAutomaticCourseRows({
+    courses: sampleSemVCourses,
+    allCatalogCourses: sampleSemVCourses,
+    hodAllocations: staleContextAllocations,
+    academicContextId: 'ctx_3_a',
+    targetCurriculumSemester: 'Semester V',
+    electiveSlotMap: {},
+  });
+  // The stale ctx_OLD allocation for 22CSC14 should NOT bind; only ctx_3_a counts
+  const csc14Row = contextBoundRows.find((r) => r.courseCode === '22CSC14');
+  assert(csc14Row && csc14Row.facultyId === null, 'Stale academic context allocation rejected for 22CSC14');
+  const csc15Row = contextBoundRows.find((r) => r.courseCode === '22CSC15');
+  assert(csc15Row && csc15Row.facultyId === 'FWL-04', 'Active academic context allocation accepted for 22CSC15');
+
+  // --- 19. Required Periods Display Tests ---
+  console.log('\n--- 19. Required Periods Display Tests ---');
+  const periodRows = contextBoundRows.filter((r) => r.courseCode === '22CSC14');
+  assert(periodRows.length === 1, 'Row for 22CSC14 is present');
+  assert(periodRows[0].requiredPeriods === 4, 'Required periods for 22CSC14 = 4 (from curriculum catalog)');
+  const csc15Periods = contextBoundRows.find((r) => r.courseCode === '22CSC15');
+  assert(csc15Periods && csc15Periods.requiredPeriods === 3, 'Required periods for 22CSC15 = 3');
+
+  // --- 20. Assignment Plan Status with Violations ---
+  console.log('\n--- 20. Assignment Plan Status with Violations ---');
+  const violationStatus = calculateAssignmentPlanStatus(theoryThreeFaculty, { hasContext: true, loading: false });
+  assert(violationStatus.state === 'PARTIAL' || violationStatus.state === 'READY', 'Plan status computed even with violations');
+
+  // --- 17b. No Duplicate Automatic Rows ---
   console.log('\n--- 17. No Duplicate Automatic Rows Tests ---');
   const duplicatedCourseList = [
     ...sampleSemVCourses,

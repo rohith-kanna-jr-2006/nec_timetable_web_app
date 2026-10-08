@@ -4,7 +4,7 @@
  */
 
 import api from './api.js';
-import { WEEK_DAYS, PERIOD_TIMINGS } from '../constants/schedule';
+import { WEEK_DAYS, PERIOD_TIMINGS } from '../constants/schedule.js';
 
 /**
  * Fetch scheduled sessions for a specific faculty member

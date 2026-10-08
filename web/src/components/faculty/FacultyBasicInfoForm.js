@@ -20,6 +20,7 @@ export default function FacultyBasicInfoForm({
   const handleBasicInfoChange = (newInfo) => {
     onChange({
       ...formData,
+      title: newInfo.title,
       facultyName: newInfo.facultyName,
       designation: newInfo.designation,
       department: newInfo.department,
@@ -43,15 +44,27 @@ export default function FacultyBasicInfoForm({
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '16px' }}>
         <Input
-          label="Faculty Name (with title)"
+          label="Title *"
+          id="faculty-title-input"
+          placeholder="e.g. Dr., Prof., Mr., Ms."
+          value={formData.title || ''}
+          onChange={(e) => handleChange('title', e.target.value)}
+          error={errors.title}
+          required
+          icon="🏷️"
+          helperText="Academic or courtesy title prefix (required)"
+        />
+
+        <Input
+          label="Faculty Name *"
           id="faculty-name-input"
-          placeholder="e.g. Dr. K. Suresh Kumar"
+          placeholder="e.g. K. Suresh Kumar"
           value={formData.facultyName || ''}
           onChange={(e) => handleChange('facultyName', e.target.value)}
           error={errors.facultyName}
           required
           icon="👤"
-          helperText="Enter full academic name including prefixes (Dr. / Mr. / Ms.)"
+          helperText="Full name without title prefix (required)"
         />
 
         <Input
@@ -61,9 +74,8 @@ export default function FacultyBasicInfoForm({
           value={formData.dob || ''}
           onChange={(e) => handleChange('dob', e.target.value)}
           error={errors.dob}
-          required
           icon="📅"
-          helperText="Format: DD-MM-YYYY"
+          helperText="Optional: Format: DD-MM-YYYY"
         />
 
         <Select
@@ -74,7 +86,8 @@ export default function FacultyBasicInfoForm({
           options={FACULTY_DESIGNATIONS.map((d) => ({ value: d, label: d }))}
           placeholder="Select academic designation..."
           error={errors.designation}
-          required
+          icon="🎓"
+          helperText="Optional: Academic position/rank"
         />
 
         <Input
@@ -86,7 +99,7 @@ export default function FacultyBasicInfoForm({
           onChange={(e) => handleChange('email', e.target.value)}
           error={errors.email}
           icon="✉️"
-          helperText="Must be a valid email format"
+          helperText="Optional: Must be a valid email format"
         />
 
         <Input
@@ -98,7 +111,7 @@ export default function FacultyBasicInfoForm({
           onChange={(e) => handleChange('phone', e.target.value)}
           error={errors.phone}
           icon="📞"
-          helperText="Optional 10-digit mobile number"
+          helperText="Optional: 10-digit mobile number"
         />
 
         <div className="ui-form-group">

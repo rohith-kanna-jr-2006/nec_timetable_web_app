@@ -7,7 +7,7 @@
     "start": "webpack serve --mode development --config webpack.config.js",
     "dev": "webpack serve --mode development --config webpack.config.js",
     "build": "webpack --mode production --config webpack.config.js",
-    "test": "node tests/auth.test.js && node tests/timetable.test.js && node tests/facultyWorkflow.test.js && node tests/frontendServices.test.js && node tests/assignmentPlan.test.js"
+    "test": "node tests/auth.test.js && node tests/timetable.test.js && node tests/facultyWorkflow.test.js && node tests/frontendServices.test.js && node tests/assignmentPlan.test.js && node tests/f5TimetableGeneration.test.js && node tests/f7TimetableApproval.test.js"
   },
   "dependencies": {
     "react": "^18.3.1",

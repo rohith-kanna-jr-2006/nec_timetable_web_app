@@ -4,7 +4,17 @@ import { getHODAllocations } from '../../services/hodAllocationService';
 import { getCourses } from '../../services/courseService';
 import { getFacultyList } from '../../services/facultyService';
 import { getAcademicContexts } from '../../services/academicContextService';
-import { findMatchingAcademicContext, resolveCurriculumSemester, normalizeCurriculumSemester } from '../../constants/academicContext';
+import {
+  findMatchingAcademicContext,
+  resolveCurriculumSemester,
+  normalizeCurriculumSemester,
+} from '../../constants/academicContext';
+import {
+  deriveAutomaticCourseRows,
+  calculateAssignmentPlanStatus,
+  validateAssignmentCounts,
+  categorizeAssignmentRow,
+} from '../../services/coordinatorDesignService';
 
 import PageHeader from '../../components/common/PageHeader';
 import Card from '../../components/common/Card';
@@ -109,6 +119,25 @@ export default function FacultyAssignmentPage() {
 
   // Display warning when no valid academic context is registered for the cohort
   const noValidContext = contexts.length > 0 && !activeContext;
+
+  // Derive authoritative course rows with required periods and assignment-count rules
+  const rows = deriveAutomaticCourseRows({
+    courses: filteredCourses,
+    allCatalogCourses: filteredCourses,
+    hodAllocations: allocations,
+    academicContextId: activeContextId,
+    targetCurriculumSemester,
+  });
+
+  // Plan status metrics derived directly from the rows
+  const planStatus = calculateAssignmentPlanStatus(rows, {
+    hasContext: Boolean(activeContextId),
+    loading,
+    error,
+  });
+
+  // Per-faculty assignment-count validation (UG Theory max 2, UG Lab max 2, PG max 1)
+  const assignmentViolations = validateAssignmentCounts(rows);
 
   return (
     <div>
@@ -256,12 +285,46 @@ export default function FacultyAssignmentPage() {
         </div>
       </Card>
 
+      {/* Assignment-Count Rules Banner */}
+      <Card style={{ marginBottom: '20px', padding: '14px 20px', borderLeft: '4px solid var(--color-info)', background: 'var(--color-surface-container-lowest)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+          <span style={{ fontSize: '1.2rem' }}>📋</span>
+          <span style={{ fontWeight: 700, fontSize: '0.875rem', color: 'var(--color-on-surface)' }}>Assignment-Count Rules:</span>
+          <Badge variant="info">UG Theory max 2</Badge>
+          <Badge variant="info">UG Lab max 2</Badge>
+          <Badge variant="info">PG max 1</Badge>
+          <span style={{ fontSize: '0.75rem', color: 'var(--color-outline)', marginLeft: 'auto' }}>
+            Per faculty, per academic context
+          </span>
+        </div>
+      </Card>
+
+      {/* Assignment-Count Violations */}
+      {assignmentViolations.length > 0 && (
+        <Card style={{ marginBottom: '20px', padding: '16px 20px', borderLeft: '4px solid var(--color-danger)' }}>
+          <div style={{ display: 'flex', alignItems: 'flex-start', gap: '14px' }}>
+            <span style={{ fontSize: '1.5rem' }}>🚫</span>
+            <div>
+              <div style={{ fontWeight: 700, color: 'var(--color-danger)' }}>Assignment Limit Exceeded</div>
+              <div style={{ marginTop: '6px', fontSize: '0.875rem', color: 'var(--color-on-surface-variant)' }}>
+                {assignmentViolations.map((v) => (
+                  <div key={`${v.facultyId}-${v.bucket}`} style={{ marginBottom: '4px' }}>
+                    {v.message}
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </Card>
+      )}
+
       {/* Course -> Faculty Allocation Table */}
       <Card style={{ padding: 0, overflow: 'hidden', marginBottom: '28px' }}>
         <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--color-border-subtle)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <h3 style={{ margin: 0, fontSize: '1rem', fontWeight: 700, color: 'var(--color-primary)' }}>
             Authoritative Course — Faculty Allocations
           </h3>
+          <Badge variant="outline">{rows.length} rows</Badge>
         </div>
 
         {loading ? (
@@ -275,57 +338,61 @@ export default function FacultyAssignmentPage() {
           <div style={{ padding: '24px' }}>
             <ErrorState message={error} onRetry={loadData} />
           </div>
-        ) : filteredCourses.length === 0 ? (
+        ) : rows.length === 0 ? (
           <div style={{ padding: '32px', textAlign: 'center', color: 'var(--color-outline)', fontSize: '0.875rem' }}>
             No courses found for Semester {targetCurriculumSemester} in curriculum catalog.
           </div>
         ) : (
           <div className="ui-table-scroll-container">
-            <table style={{ width: '100%', minWidth: '850px', borderCollapse: 'collapse', fontSize: '0.875rem' }}>
+            <table style={{ width: '100%', minWidth: '900px', borderCollapse: 'collapse', fontSize: '0.875rem' }}>
               <thead>
                 <tr style={{ backgroundColor: 'var(--color-surface-container-low)', textAlign: 'left', borderBottom: '1px solid var(--color-surface-container)' }}>
                   <th style={{ padding: '12px 16px', fontWeight: 600 }}>Course Code</th>
                   <th style={{ padding: '12px 16px', fontWeight: 600 }}>Course Title</th>
-                  <th style={{ padding: '12px 16px', fontWeight: 600 }}>Type & Credits</th>
+                  <th style={{ padding: '12px 16px', fontWeight: 600 }}>Type</th>
+                  <th style={{ padding: '12px 16px', fontWeight: 600 }}>Required Periods</th>
                   <th style={{ padding: '12px 16px', fontWeight: 600 }}>HOD-Assigned Faculty</th>
-                  <th style={{ padding: '12px 16px', fontWeight: 600 }}>Allocation Type</th>
-                  <th style={{ padding: '12px 16px', fontWeight: 600, textAlign: 'right' }}>Design Readiness</th>
+                  <th style={{ padding: '12px 16px', fontWeight: 600 }}>Status</th>
                 </tr>
               </thead>
               <tbody>
-                {filteredCourses.map((crs) => {
+                {rows.map((row) => {
                   const existingAlloc = allocations.find((a) => {
                     const matchCtx = activeContextId
                       ? String(a.academicContextId?._id || a.academicContextId) === String(activeContextId)
                       : a.academicContextId?.year === selectedYear && a.academicContextId?.section === selectedSection;
-                    return matchCtx && a.courseCode === crs.courseCode;
+                    return matchCtx && a.courseCode === row.courseCode;
                   });
 
                   const facultyMatch = existingAlloc
                     ? facultyList.find((f) => f.facultyId === existingAlloc.facultyId)
                     : null;
 
+                  const violation = assignmentViolations.find(
+                    (v) => v.facultyId === row.facultyId && categorizeAssignmentRow(row) === v.bucket
+                  );
+
                   return (
                     <tr
-                      key={crs.courseCode}
+                      key={row.id || `${row.courseCode}_${activeContextId || 'ctx'}`}
                       style={{
                         borderBottom: '1px solid var(--color-surface-container)',
                         backgroundColor: existingAlloc ? 'transparent' : 'rgba(245, 158, 11, 0.03)',
                       }}
                     >
                       <td style={{ padding: '12px 16px', fontFamily: 'var(--font-mono)', fontWeight: 700, color: 'var(--color-primary)' }}>
-                        {crs.courseCode}
+                        {row.courseCode}
                       </td>
                       <td style={{ padding: '12px 16px', fontWeight: 600 }}>
-                        {crs.courseName || crs.title || '—'}
+                        {row.courseTitle || '—'}
                       </td>
-                      <td style={{ padding: '12px 16px', color: 'var(--color-on-surface-variant)' }}>
-                        <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
-                          <Badge variant="outline">{crs.type || 'THEORY'}</Badge>
-                          <span style={{ fontSize: '0.75rem', color: 'var(--color-outline)' }}>
-                            {crs.credits ? `${crs.credits} Credits` : crs.periodsPerWeek ? `${crs.periodsPerWeek} hrs` : ''}
-                          </span>
-                        </div>
+                      <td style={{ padding: '12px 16px' }}>
+                        <Badge variant={row.type === 'LAB' ? 'warning' : row.type === 'PG' ? 'secondary' : 'outline'}>
+                          {row.type || 'THEORY'}
+                        </Badge>
+                      </td>
+                      <td style={{ padding: '12px 16px', fontWeight: 700, color: 'var(--color-primary)' }}>
+                        {row.requiredPeriods || 0}
                       </td>
                       <td style={{ padding: '12px 16px' }}>
                         {existingAlloc ? (
@@ -340,37 +407,16 @@ export default function FacultyAssignmentPage() {
                         ) : (
                           <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                             <Badge variant="warning">HOD Faculty Assignment Required</Badge>
-                            <span style={{ fontSize: '0.75rem', color: 'var(--color-outline)' }}>
-                              Unassigned
-                            </span>
                           </div>
                         )}
                       </td>
                       <td style={{ padding: '12px 16px' }}>
-                        {existingAlloc ? (
-                          <Badge variant="success">
-                            {existingAlloc.allocationType || 'THEORY'}
-                          </Badge>
+                        {violation ? (
+                          <Badge variant="danger">{violation.label} EXCEEDED</Badge>
+                        ) : row.status === 'HOD ALLOCATED' ? (
+                          <Badge variant="success">{row.status}</Badge>
                         ) : (
-                          <span style={{ color: 'var(--color-outline)', fontSize: '0.8125rem' }}>Pending</span>
-                        )}
-                      </td>
-                      <td style={{ padding: '12px 16px', textAlign: 'right' }}>
-                        {existingAlloc ? (
-                          <Button
-                            variant="subtle"
-                            size="sm"
-                            icon="⚡"
-                            onClick={() => {
-                              window.location.href = '/coordinator/optimization-solver';
-                            }}
-                          >
-                            Schedule Slot
-                          </Button>
-                        ) : (
-                          <span style={{ fontSize: '0.75rem', color: 'var(--color-warning-dark)', fontWeight: 600 }}>
-                            Allocation Pending — HOD faculty assignment required
-                          </span>
+                          <Badge variant="warning">{row.status}</Badge>
                         )}
                       </td>
                     </tr>

@@ -46,7 +46,5 @@ screenshot*.jpeg
 *.webm
 *.mp4
 
-# Backup and patch files
 *.patch
 *.bak
-scratch/validation/
