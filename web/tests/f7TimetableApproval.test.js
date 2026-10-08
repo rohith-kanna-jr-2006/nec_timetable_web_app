@@ -27,7 +27,6 @@ async function runF7Tests() {
   const hodAllocationService = await import('../src/services/hodAllocationService.js');
   const coordinatorService = await import('../src/services/coordinatorService.js');
   
-  // For ES modules with default export, named exports are on the default object
   const transitionTimetableVersion = hodAllocationService.default ? hodAllocationService.default.transitionTimetableVersion : hodAllocationService.transitionTimetableVersion;
   const submitTimetableForApproval = coordinatorService.default ? coordinatorService.default.submitTimetableForApproval : coordinatorService.submitTimetableForApproval;
 
