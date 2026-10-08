@@ -4,6 +4,7 @@ import { getHODAllocations } from '../../services/hodAllocationService';
 import { getCourses } from '../../services/courseService';
 import { getFacultyList } from '../../services/facultyService';
 import { getAcademicContexts } from '../../services/academicContextService';
+import { findMatchingAcademicContext, resolveCurriculumSemester, normalizeCurriculumSemester } from '../../constants/academicContext';
 
 import PageHeader from '../../components/common/PageHeader';
 import Card from '../../components/common/Card';
@@ -76,17 +77,24 @@ export default function FacultyAssignmentPage() {
     loadData();
   }, []);
 
-  // Resolve current active AcademicContext ID
-  const activeContext = contexts.find(
-    (c) => c.year === selectedYear && c.section === selectedSection && c.department === 'CSE'
-  );
+  // Resolve current active AcademicContext ID using authoritative helpers
+  const activeContext = findMatchingAcademicContext(contexts, {
+    year: selectedYear,
+    semester: resolveCurriculumSemester(selectedYear, 'Odd Semester'),
+    section: selectedSection,
+    department: 'CSE',
+  });
   const activeContextId = activeContext?._id || activeContext?.id;
 
-  // Filter courses for the selected cohort's semester
-  const targetSemester = SEMESTER_MAP[selectedYear] || 3;
+  // Resolve target semester using the curriculum mapping logic
+  const targetCurriculumSemester = resolveCurriculumSemester(selectedYear, 'Odd Semester');
+
+  // Filter courses for the selected cohort's semester using consistent normalization
   const filteredCourses = courses.filter((c) => {
     if (!c.semester) return true;
-    return Number(c.semester) === targetSemester;
+    // Normalize backend semester using the existing helper function
+    const normalizedBackendSem = normalizeCurriculumSemester(c.semester);
+    return normalizedBackendSem === targetCurriculumSemester;
   });
 
   // Calculate allocation coverage
@@ -98,6 +106,9 @@ export default function FacultyAssignmentPage() {
       return matchCtx && a.courseCode === crs.courseCode;
     });
   }).length;
+
+  // Display warning when no valid academic context is registered for the cohort
+  const noValidContext = contexts.length > 0 && !activeContext;
 
   return (
     <div>
@@ -132,6 +143,21 @@ export default function FacultyAssignmentPage() {
           </div>
         }
       />
+
+      {/* No Valid Context Warning Banner */}
+      {noValidContext && (
+        <Card style={{ marginBottom: '20px', padding: '16px 20px', borderLeft: '4px solid var(--color-warning)' }}>
+          <div style={{ display: 'flex', alignItems: 'flex-start', gap: '14px' }}>
+            <span style={{ fontSize: '1.5rem' }}>⚠️</span>
+            <div>
+              <span style={{ fontWeight: 700, color: 'var(--color-warning-dark)' }}>No Valid Academic Context Registered:</span>
+              <p style={{ margin: '6px 0 0 0', fontSize: '0.875rem', color: 'var(--color-on-surface-variant)', lineHeight: 1.5 }}>
+                No academic context is registered for {selectedYear} {selectedSection} (Semester {targetCurriculumSemester}). Create one via the Academic Context management module before accessing course allocations.
+              </p>
+            </div>
+          </div>
+        </Card>
+      )}
 
       {/* Authority Banner */}
       <Card style={{ marginBottom: '20px', padding: '16px 20px', borderLeft: '4px solid var(--color-primary)' }}>
@@ -216,7 +242,7 @@ export default function FacultyAssignmentPage() {
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
           <div>
             <div style={{ fontSize: '1.125rem', fontWeight: 800, color: 'var(--color-primary)' }}>
-              CSE — {selectedYear} &apos;{selectedSection}&apos; (Semester {targetSemester}, Odd 2026-27)
+              CSE — {selectedYear} &apos;{selectedSection}&apos; (Semester {targetCurriculumSemester}, Odd 2026-27)
             </div>
             <div style={{ fontSize: '0.8125rem', color: 'var(--color-outline)', marginTop: '2px' }}>
               Curriculum Catalog • {allocatedCount} of {filteredCourses.length} Courses Allocated by HOD
@@ -251,7 +277,7 @@ export default function FacultyAssignmentPage() {
           </div>
         ) : filteredCourses.length === 0 ? (
           <div style={{ padding: '32px', textAlign: 'center', color: 'var(--color-outline)', fontSize: '0.875rem' }}>
-            No courses found for Semester {targetSemester} in curriculum catalog.
+            No courses found for Semester {targetCurriculumSemester} in curriculum catalog.
           </div>
         ) : (
           <div className="ui-table-scroll-container">
@@ -313,7 +339,7 @@ export default function FacultyAssignmentPage() {
                           </div>
                         ) : (
                           <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                            <Badge variant="warning">[REQUIRES HOD DECISION]</Badge>
+                            <Badge variant="warning">HOD Faculty Assignment Required</Badge>
                             <span style={{ fontSize: '0.75rem', color: 'var(--color-outline)' }}>
                               Unassigned
                             </span>
@@ -343,7 +369,7 @@ export default function FacultyAssignmentPage() {
                           </Button>
                         ) : (
                           <span style={{ fontSize: '0.75rem', color: 'var(--color-warning-dark)', fontWeight: 600 }}>
-                            Awaiting HOD
+                            Allocation Pending — HOD faculty assignment required
                           </span>
                         )}
                       </td>

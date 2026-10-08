@@ -1,13 +1,13 @@
 const express = require('express');
 const router = express.Router();
 const facultyController = require('../controllers/facultyController');
-const { authenticateUser } = require('../middleware/authMiddleware');
+const { authenticateUser, optionalAuthenticateUser } = require('../middleware/authMiddleware');
 const { requireRole } = require('../middleware/roleMiddleware');
 const { validate } = require('../middleware/validateMiddleware');
 const { validateFacultyCreationPayload } = require('../validators/facultyCreationValidators');
 
 router.get('/', facultyController.getFacultyList);
-router.get('/:facultyId/allocations', facultyController.getFacultyAllocations);
+router.get('/:facultyId/allocations', optionalAuthenticateUser, facultyController.getFacultyAllocations);
 router.get('/:facultyId', facultyController.getFacultyById);
 router.post(
   '/',

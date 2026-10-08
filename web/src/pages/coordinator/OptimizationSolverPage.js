@@ -197,22 +197,35 @@ export default function OptimizationSolverPage() {
     error,
   });
 
-  // Check for courses with HOD allocations but missing from the curriculum catalog
-  const catalogMissingRows = (() => {
-    if (!allCatalogCourses.length || baseLoading) return [];
-    const validCodes = new Set(
-      allCatalogCourses.map((c) => (c.courseCode || '').toUpperCase().trim()).filter(Boolean)
-    );
-    return courseRows.filter(
-      (r) => r.isAllocated && r.courseCode && !validCodes.has(r.courseCode.toUpperCase().trim())
-    );
-  })();
-
   // Authoritative Design Context, Validation, & Context Lifecycle Stores (FE-P1-007, FE-P1-009, FE-P1-008)
   const [designContext, setDesignContext] = useState(null);
   const [cohortValidation, setCohortValidation] = useState(null);
   const [contextStatus, setContextStatus] = useState(null);
   const [validationLoading, setValidationLoading] = useState(false);
+
+  // Check for courses with HOD allocations but missing from the curriculum catalog.
+  // This is a client-side safety net only; the authoritative readiness signal is
+  // cohortValidation.readyForGeneration returned by the backend. We exclude:
+  //   - synthetic elective slots (they are placeholders, not HOD allocations)
+  //   - rows whose requirement source is explicitly 'MISSING'
+  // and we only surface the blocker if the backend has not already marked the
+  // cohort ready for generation (cohortValidation.readyForGeneration === true).
+  const catalogMissingRows = (() => {
+    // Authoritative backend signal takes precedence: if the backend says the
+    // cohort is ready, we do not block on client-side heuristics.
+    if (cohortValidation && cohortValidation.readyForGeneration) return [];
+    if (!allCatalogCourses.length || baseLoading) return [];
+    const validCodes = new Set(
+      allCatalogCourses.map((c) => (c.courseCode || '').toUpperCase().trim()).filter(Boolean)
+    );
+    return courseRows.filter((r) => {
+      if (!r.isAllocated) return false;
+      if (!r.courseCode) return false;
+      if (r.isElectiveSlot) return false;
+      if (r.requirementSource === 'MISSING') return false;
+      return !validCodes.has(r.courseCode.toUpperCase().trim());
+    });
+  })();
 
   // Authoritative Design Context, Validation, and Context Status fetch
   const loadDesignAndValidation = useCallback(async (ctxId, isCancelledCheck = () => false) => {
@@ -274,7 +287,15 @@ export default function OptimizationSolverPage() {
     };
   }, [baseLoading, activeContextId, loadDesignAndValidation]);
 
-  const isGenerationReady = cohortValidation != null ? cohortValidation.readyForGeneration : planStatus.isReady;
+  // AUTHORITATIVE readiness: the backend cohort-validation endpoint is the
+  // source of truth for generate-readiness. We only trust planStatus.isReady
+  // as a client-side placeholder BEFORE the authoritative check completes;
+  // once cohortValidation is present, its readyForGeneration value wins and
+  // cannot be overridden by a permissive client heuristic.
+  // If validationLoading is still true, we do NOT yet enable generation.
+  const isGenerationReady = cohortValidation != null
+    ? Boolean(cohortValidation.readyForGeneration)
+    : (planStatus.isReady && !validationLoading);
   const pendingAllocationCount = cohortValidation != null
     ? Math.max(0, (cohortValidation.totalRequiredCourses || 0) - (cohortValidation.allocatedCount || 0))
     : planStatus.pendingCount;
@@ -601,7 +622,7 @@ export default function OptimizationSolverPage() {
                   Curriculum Course–Faculty Assignment Plan
                 </h3>
                 <p style={{ margin: '4px 0 0 0', fontSize: '0.8125rem', color: 'var(--color-outline)' }}>
-                  Automatically populated from backend Course curriculum and authoritative HOD Faculty Allocations.
+                  Automatically populated from backend Course curriculum and HOD-authored faculty allocations (read-only for the coordinator).
                 </p>
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -638,16 +659,16 @@ export default function OptimizationSolverPage() {
                   <strong>Lab:</strong> {planStatus.labCount}
                 </div>
                 <div>
-                  <strong>HOD Allocated:</strong>{' '}
+                  <strong>HOD-Allocated Courses:</strong>{' '}
                   <span style={{ color: 'var(--color-success)', fontWeight: 600 }}>
                     {planStatus.allocatedCount}
                   </span>
                 </div>
                 {planStatus.pendingCount > 0 && (
                   <div>
-                    <strong>Incomplete HOD Allocation:</strong>{' '}
+                    <strong>Allocation Pending:</strong>{' '}
                     <span style={{ color: 'var(--color-warning-dark)', fontWeight: 600 }}>
-                      {planStatus.pendingCount} course{planStatus.pendingCount > 1 ? 's' : ''} awaiting HOD decision
+                      {planStatus.pendingCount} course{planStatus.pendingCount > 1 ? 's' : ''} without HOD-authored faculty assignment
                     </span>
                   </div>
                 )}
@@ -691,7 +712,7 @@ export default function OptimizationSolverPage() {
               >
                 <span style={{ fontSize: '1.25rem' }}>⚠️</span>
                 <div>
-                  <strong>Faculty Allocation Pending:</strong> Faculty allocation is pending HOD decision for one or more courses. Courses marked <strong>[REQUIRES HOD DECISION]</strong> must be allocated by the Head of Department before timetable generation can proceed.
+                  <strong>Allocation Pending — HOD Faculty Assignment Required:</strong> Faculty allocation is pending HOD assignment for one or more courses. Courses marked <strong>HOD Faculty Assignment Required</strong> must be allocated by the Head of Department before timetable generation can proceed.
                 </div>
               </div>
             )}
@@ -744,7 +765,7 @@ export default function OptimizationSolverPage() {
                     >
                       <th style={{ padding: '12px 16px', fontWeight: 600 }}>Course Code</th>
                       <th style={{ padding: '12px 16px', fontWeight: 600 }}>Course Title</th>
-                      <th style={{ padding: '12px 16px', fontWeight: 600 }}>HOD Approved Faculty</th>
+                      <th style={{ padding: '12px 16px', fontWeight: 600 }}>HOD-Assigned Faculty</th>
                       <th style={{ padding: '12px 16px', fontWeight: 600 }}>Type</th>
                       <th style={{ padding: '12px 16px', fontWeight: 600, textAlign: 'center' }}>
                         Required Periods
@@ -796,12 +817,12 @@ export default function OptimizationSolverPage() {
                                 );
                               })}
                               <span style={{ fontSize: '0.6875rem', color: 'var(--color-outline)', fontStyle: 'italic' }}>
-                                Authoritative — HOD approved
+                                Authoritative — HOD-assigned faculty
                               </span>
                             </div>
                           ) : (
                             <span style={{ color: 'var(--color-warning-dark)', fontWeight: 600, fontSize: '0.8125rem' }}>
-                              [REQUIRES HOD DECISION]
+                              HOD Faculty Assignment Required
                             </span>
                           )}
                         </td>

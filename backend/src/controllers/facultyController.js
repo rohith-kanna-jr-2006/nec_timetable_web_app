@@ -438,6 +438,30 @@ async function getFacultyAllocations(req, res, next) {
     const { facultyId } = req.params;
     const { category, year, section, courseCode, allocationType } = req.query;
 
+    // B9: Faculty Data-Scope Security
+    // If authenticated as FACULTY, enforce that the user can only view their own allocations.
+    if (req.user && req.user.role === 'FACULTY') {
+      const userFacultyId = (req.user.facultyId || '').toUpperCase();
+      const targetFacultyId = (facultyId || '').toUpperCase();
+      const userDocId = (req.user.id || req.user._id || '').toString();
+
+      let isAuthorized = (userFacultyId && userFacultyId === targetFacultyId) ||
+                         (userDocId && userDocId === facultyId);
+
+      if (!isAuthorized && facultyId.match(/^[0-9a-fA-F]{24}$/)) {
+        try {
+          const facDoc = await Faculty.findById(facultyId);
+          if (facDoc && facDoc.facultyId && facDoc.facultyId.toUpperCase() === userFacultyId) {
+            isAuthorized = true;
+          }
+        } catch (_) {}
+      }
+
+      if (!isAuthorized) {
+        return errorResponse(res, 'Access denied: Faculty members may only view their own allocations.', 403, 'FORBIDDEN');
+      }
+    }
+
     let workload = await FacultyWorkload.findOne({ facultyId });
     if (!workload && facultyId && facultyId.match(/^[0-9a-fA-F]{24}$/)) {
       const fac = await Faculty.findById(facultyId);

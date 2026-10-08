@@ -10,6 +10,7 @@
  */
 
 const Faculty = require('../models/Faculty');
+const Course = require('../models/Course');
 
 const ALLOCATION_RULES = {
   THEORY_SINGLE: 'THEORY_SINGLE',
@@ -916,6 +917,110 @@ async function validateAllocationPayload({ academicContext, course, payload, exi
               facultyDepartment: facDoc.department,
               facultyId: facDoc.facultyId,
             },
+          },
+        };
+      }
+    }
+  }
+
+  // 6d. Workload limit checks (UG Theory max 2, UG Lab max 2, PG max 1)
+  const isTargetLab =
+    policy.rule === ALLOCATION_RULES.LAB_2_TO_3 ||
+    course.isLab === true ||
+    course.courseType === 'LAB';
+  const isTargetPg =
+    academicContext.program === 'PG' ||
+    course.category === 'PG' ||
+    course.isPgSubject === true ||
+    (course.programme && course.programme.includes('M.E.'));
+  const isTargetTheory =
+    !isTargetLab &&
+    !isTargetPg &&
+    course.category !== 'MC' &&
+    course.courseType !== 'MC' &&
+    (policy.rule === ALLOCATION_RULES.THEORY_SINGLE ||
+      course.courseType === 'THEORY' ||
+      !course.courseType ||
+      course.courseType === 'THEORY');
+
+  if (Array.isArray(existingAllocations)) {
+    const existingCodes = existingAllocations.map((a) => (a.courseCode || '').toUpperCase()).filter(Boolean);
+    const existingCourseDocs = existingCodes.length > 0 ? await Course.find({ courseCode: { $in: existingCodes } }) : [];
+    const courseDocMap = new Map(existingCourseDocs.map((c) => [c.courseCode, c]));
+
+    for (const fa of inputAssignments) {
+      const fid = (fa.facultyId || '').trim();
+      if (!fid) continue;
+      const facDoc = facultyDocsMap.get(fid) || { facultyName: fid, facultyId: fid };
+
+      let theoryCount = 0;
+      let labCount = 0;
+      let pgCount = 0;
+
+      for (const alloc of existingAllocations) {
+        if (alloc.courseCode && alloc.courseCode.toUpperCase() === courseCode) {
+          continue; // Skip the course currently being modified/re-allocated
+        }
+        const hasFac =
+          alloc.facultyId === fid ||
+          (Array.isArray(alloc.facultyAssignments) &&
+            alloc.facultyAssignments.some((slot) => (slot.facultyId || '').trim() === fid));
+
+        if (!hasFac) continue;
+
+        const allocCourse = courseDocMap.get((alloc.courseCode || '').toUpperCase());
+
+        const isAllocPg =
+          alloc.allocationType === 'PG' ||
+          (allocCourse && (allocCourse.category === 'PG' || allocCourse.isPgSubject === true || (allocCourse.programme && allocCourse.programme.includes('M.E.'))));
+
+        const isAllocLab =
+          alloc.allocationRule === ALLOCATION_RULES.LAB_2_TO_3 ||
+          alloc.allocationType === 'LAB_PRIMARY' ||
+          alloc.allocationType === 'LAB_ADDITIONAL' ||
+          (allocCourse && (allocCourse.isLab === true || allocCourse.courseType === 'LAB'));
+
+        const isAllocTheory =
+          !isAllocLab &&
+          !isAllocPg &&
+          alloc.allocationType !== 'MC' &&
+          (alloc.allocationRule === ALLOCATION_RULES.THEORY_SINGLE ||
+            alloc.allocationType === 'THEORY');
+
+        if (isAllocLab) labCount++;
+        else if (isAllocPg) pgCount++;
+        else if (isAllocTheory) theoryCount++;
+      }
+
+      if (isTargetTheory && theoryCount >= 2) {
+        return {
+          isValid: false,
+          error: {
+            code: 'THEORY_LOAD_LIMIT_EXCEEDED',
+            message: `Faculty member '${facDoc.facultyName}' (${fid}) has already been allocated 2 UG Theory courses. Third assignment is rejected.`,
+            details: { courseCode, facultyId: fid, currentTheoryCount: theoryCount, maxAllowed: 2 },
+          },
+        };
+      }
+
+      if (isTargetLab && labCount >= 2) {
+        return {
+          isValid: false,
+          error: {
+            code: 'LAB_LOAD_LIMIT_EXCEEDED',
+            message: `Faculty member '${facDoc.facultyName}' (${fid}) has already been allocated 2 UG Lab courses. Third assignment is rejected.`,
+            details: { courseCode, facultyId: fid, currentLabCount: labCount, maxAllowed: 2 },
+          },
+        };
+      }
+
+      if (isTargetPg && pgCount >= 1) {
+        return {
+          isValid: false,
+          error: {
+            code: 'PG_LOAD_LIMIT_EXCEEDED',
+            message: `Faculty member '${facDoc.facultyName}' (${fid}) has already been allocated 1 PG-level course. Second assignment is rejected.`,
+            details: { courseCode, facultyId: fid, currentPgCount: pgCount, maxAllowed: 1 },
           },
         };
       }
