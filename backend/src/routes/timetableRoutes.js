@@ -2,7 +2,7 @@ const express = require('express');
 const rateLimit = require('express-rate-limit');
 const router = express.Router();
 const timetableController = require('../controllers/timetableController');
-const { authenticateUser } = require('../middleware/authMiddleware');
+const { authenticateUser, optionalAuthenticateUser } = require('../middleware/authMiddleware');
 const { requireRole } = require('../middleware/roleMiddleware');
 const { validate } = require('../middleware/validateMiddleware');
 const {
@@ -12,7 +12,7 @@ const {
 } = require('../validators/timetableValidators');
 
 // Timetable Views
-router.get('/faculty/:facultyId', timetableController.getFacultyTimetable);
+router.get('/faculty/:facultyId', optionalAuthenticateUser, timetableController.getFacultyTimetable);
 router.get('/class/:academicContextId', timetableController.getClassTimetable);
 router.get('/published/:academicContextId', timetableController.getPublishedClassTimetable);
 router.get('/context-status/:academicContextId', timetableController.getContextStatus);

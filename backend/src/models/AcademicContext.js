@@ -38,17 +38,15 @@ const academicContextSchema = new mongoose.Schema(
     },
     fromYear: {
       type: String,
-      required: [true, 'From Year is required'],
       trim: true,
     },
     toYear: {
       type: String,
-      required: [true, 'To Year is required'],
       trim: true,
     },
     regulation: {
       type: String,
-      required: [true, 'Regulation is required'],
+      default: 'R22',
       trim: true,
     },
     year: {
@@ -88,6 +86,19 @@ const academicContextSchema = new mongoose.Schema(
  */
 academicContextSchema.pre('validate', function normaliseAcademicYear(next) {
   try {
+    if (!this.regulation) {
+      this.regulation = 'R22';
+    }
+
+    if ((this.academicYearFrom === undefined || this.academicYearFrom === null || this.academicYearFrom === '') && this.fromYear) {
+      const parsedFrom = Number(this.fromYear);
+      if (!isNaN(parsedFrom)) this.academicYearFrom = parsedFrom;
+    }
+    if ((this.academicYearTo === undefined || this.academicYearTo === null || this.academicYearTo === '') && this.toYear) {
+      const parsedTo = Number(this.toYear);
+      if (!isNaN(parsedTo)) this.academicYearTo = parsedTo;
+    }
+
     const hasFrom = this.academicYearFrom !== undefined && this.academicYearFrom !== null && this.academicYearFrom !== '';
     const hasTo = this.academicYearTo !== undefined && this.academicYearTo !== null && this.academicYearTo !== '';
 
@@ -118,6 +129,14 @@ academicContextSchema.pre('validate', function normaliseAcademicYear(next) {
 
     // Keep the legacy mirror consistent with the canonical range.
     this.academicYear = formatAcademicYear(this.academicYearFrom, this.academicYearTo);
+
+    if (!this.fromYear && this.academicYearFrom) {
+      this.fromYear = String(this.academicYearFrom);
+    }
+    if (!this.toYear && this.academicYearTo) {
+      this.toYear = String(this.academicYearTo);
+    }
+
     return next();
   } catch (err) {
     return next(err);

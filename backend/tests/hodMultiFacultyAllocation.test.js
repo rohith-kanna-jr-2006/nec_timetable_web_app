@@ -133,6 +133,9 @@ async function runTests() {
     if (!ctxIII_A) {
       ctxIII_A = await AcademicContext.create({
         academicYear: '2026-27',
+        fromYear: '2026',
+        toYear: '2027',
+        regulation: 'R22',
         semester: 'Odd Semester',
         department: 'CSE',
         year: 'III Year',
@@ -146,6 +149,9 @@ async function runTests() {
     if (!ctxIII_B) {
       ctxIII_B = await AcademicContext.create({
         academicYear: '2026-27',
+        fromYear: '2026',
+        toYear: '2027',
+        regulation: 'R22',
         semester: 'Odd Semester',
         department: 'CSE',
         year: 'III Year',
@@ -159,6 +165,9 @@ async function runTests() {
     if (!ctxII_A) {
       ctxII_A = await AcademicContext.create({
         academicYear: '2026-27',
+        fromYear: '2026',
+        toYear: '2027',
+        regulation: 'R22',
         semester: 'Odd Semester',
         department: 'CSE',
         year: 'II Year',
@@ -737,6 +746,9 @@ async function runTests() {
     if (!ctxI_A) {
       ctxI_A = await AcademicContext.create({
         academicYear: '2026-27',
+        fromYear: '2026',
+        toYear: '2027',
+        regulation: 'R22',
         semester: 'Odd Semester',
         department: 'CSE',
         year: 'I Year',
@@ -970,6 +982,9 @@ async function runTests() {
     if (!ctxIII_D) {
       ctxIII_D = await AcademicContext.create({
         academicYear: '2026-27',
+        fromYear: '2026',
+        toYear: '2027',
+        regulation: 'R22',
         semester: 'Odd Semester',
         department: 'CSE',
         year: 'III Year',

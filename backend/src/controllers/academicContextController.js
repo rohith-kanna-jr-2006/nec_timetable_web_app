@@ -96,7 +96,20 @@ async function getContextById(req, res, next) {
  */
 async function createContext(req, res, next) {
   try {
-    const { academicYear, academicYearFrom, academicYearTo, semester, department, year, section, program, status } = req.body;
+    const {
+      academicYear,
+      academicYearFrom,
+      academicYearTo,
+      semester,
+      department,
+      year,
+      section,
+      program,
+      status,
+      fromYear,
+      toYear,
+      regulation,
+    } = req.body;
 
     const range = resolveAcademicYearRange({ academicYear, academicYearFrom, academicYearTo });
     if (!range) {
@@ -133,8 +146,8 @@ async function createContext(req, res, next) {
       academicYearTo: range.academicYearTo,
       semester: semester.trim(),
       department: department.toUpperCase().trim(),
-      fromYear: fromYear ? fromYear.trim() : academicYear.trim(),
-      toYear: toYear ? toYear.trim() : academicYear.trim(),
+      fromYear: fromYear ? fromYear.trim() : (academicYear ? academicYear.trim() : String(range.academicYearFrom)),
+      toYear: toYear ? toYear.trim() : (academicYear ? academicYear.trim() : String(range.academicYearTo)),
       regulation: regulation ? regulation.trim() : 'R22',
       year: year.trim(),
       section: section.toUpperCase().trim(),
