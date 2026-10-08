@@ -621,7 +621,7 @@ async function runTests() {
     // scheduled sessions, so this lifecycle fixture now seeds one session.
     // Without it the GENERATED -> PENDING_HOD_APPROVAL transition can never
     // succeed, which is correct domain behaviour but not what this test asserts.
-    await TimetableSession.create({
+    const session = await TimetableSession.create({
       timetableVersionId: ttVersion._id,
       academicContextId: contextId,
       courseCode: '22CSC14',
@@ -658,16 +658,6 @@ async function runTests() {
     // Test 18: TimetableSession Isolation from Workload
     // ------------------------------------------------------------
     console.log('\n--- Test 18: TimetableSession Isolation from Workload ---');
-    const session = await TimetableSession.create({
-      timetableVersionId: v4._id,
-      academicContextId: contextId,
-      courseCode: '22CSC14',
-      facultyId: 'FWL-04',
-      day: 'MON',
-      period: 'P1',
-      room: 'LH-101',
-      sessionType: 'THEORY',
-    });
     assert(!!session._id, 'TimetableSession created with schedule coordinates (day: MON, period: P1, room: LH-101)');
 
     // Verify workload record for FWL-04 does not contain schedule slots
