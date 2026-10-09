@@ -44,5 +44,8 @@ router.use('/notifications', notificationRoutes);
 router.use('/availability', availabilityRoutes);
 router.use('/absences', absenceRoutes);
 router.use('/substitutes', substituteRoutes);
+const tcProposalRoutes = require('./tcProposalRoutes');
+router.use('/tc-proposals', tcProposalRoutes);
+router.use('/tc-allocations', tcProposalRoutes);
 
 module.exports = router;

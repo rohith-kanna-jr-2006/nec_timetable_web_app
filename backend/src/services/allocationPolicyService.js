@@ -932,6 +932,7 @@ async function validateAllocationPayload({ academicContext, course, payload, exi
     academicContext.program === 'PG' ||
     course.category === 'PG' ||
     course.isPgSubject === true ||
+    payload.allocationType === 'PG' ||
     (course.programme && course.programme.includes('M.E.'));
   const isTargetTheory =
     !isTargetLab &&
