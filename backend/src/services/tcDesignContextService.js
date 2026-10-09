@@ -177,25 +177,33 @@ function computeTimetableEligibility(allocationStatus, policy, validationErrors)
     return { eligible: false, reason: 'FACULTY_VALIDATION_ERROR' };
   }
 
-  // Allocation completeness
-  switch (allocationStatus) {
-    case 'UNALLOCATED':
-      return { eligible: false, reason: 'HOD_FACULTY_ALLOCATION_REQUIRED' };
-    case 'INCOMPLETE':
-    case 'PRIMARY_ONLY':
-      return { eligible: false, reason: 'HOD_FACULTY_ALLOCATION_INCOMPLETE' };
-    case 'MATHS_BME_MISSING':
-      return { eligible: false, reason: 'MATHS_BME_FACULTY_REQUIRED' };
-    case 'ENGLISH_MISSING':
-      return { eligible: false, reason: 'ENGLISH_FACULTY_REQUIRED' };
-    case 'COMPLETE':
-    case 'COMPLETE_2':
-    case 'COMPLETE_3':
-    case 'MAPPED':
-      return { eligible: true, reason: null };
-    default:
-      return { eligible: false, reason: 'HOD_FACULTY_ALLOCATION_REQUIRED' };
+  // Handle TC proposals (DRAFT, assignedBy: 'TC')
+  if (allocation && allocation.status === 'DRAFT' && allocation.assignedBy === 'TC') {
+    // TC proposals are eligible if they have valid faculty assignments
+    return { eligible: true, reason: null };
   }
+
+  // Handle HOD allocations (APPROVED or non-REJECTED)
+  if (allocation && allocation.status !== 'REJECTED') {
+    switch (allocationStatus) {
+      case 'UNALLOCATED':
+      case 'INCOMPLETE':
+      case 'PRIMARY_ONLY':
+      case 'MATHS_BME_MISSING':
+      case 'ENGLISH_MISSING':
+        return { eligible: false, reason: 'HOD_FACULTY_ALLOCATION_INCOMPLETE' };
+      case 'COMPLETE':
+      case 'COMPLETE_2':
+      case 'COMPLETE_3':
+      case 'MAPPED':
+        return { eligible: true, reason: null };
+      default:
+        return { eligible: false, reason: 'HOD_FACULTY_ALLOCATION_REQUIRED' };
+    }
+  }
+
+  // Default: no allocation
+  return { eligible: false, reason: 'HOD_FACULTY_ALLOCATION_REQUIRED' };
 }
 
 // ---------------------------------------------------------------------------
