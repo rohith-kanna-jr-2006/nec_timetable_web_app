@@ -428,6 +428,86 @@ async function runTests() {
   assert(readyPlanStatus.isReady === true, 'isReady is true when all courses are allocated');
   assert(readyPlanStatus.pendingCount === 0, 'Pending count is 0 in READY state');
 
+  // Add TC proposal to ensure test reflects TC workflow
+  const tcProposalAlloc = {
+    _id: 'tc_draft_001',
+    academicContextId: 'ctx_3_a',
+    courseCode: '22MAN8R', // Ensure course exists (22MAN8R is in sampleSemVCourses)
+    facultyId: 'FWL-08',
+    facultyName: 'Dr. TC Faculty',
+    status: 'DRAFT',
+    assignedBy: 'TC',
+    allocationType: 'THEORY',
+    courseId: 'tc_draft_001',
+  };
+  const rowsWithTcProposal = deriveAutomaticCourseRows({
+    courses: sampleSemVCourses,
+    allCatalogCourses: sampleSemVCourses,
+    hodAllocations: [...fullyAllocatedAllocs, tcProposalAlloc],
+    academicContextId: 'ctx_3_a',
+    targetCurriculumSemester: 'Semester V',
+    electiveSlotMap: {},
+  });
+  const tcProposalPlanStatus = calculateAssignmentPlanStatus(rowsWithTcProposal, { hasContext: true });
+  // TC proposal should count as allocated for readiness determination (per requirements)
+  assert(tcProposalPlanStatus.state === 'READY', 'TC proposal should count toward readiness');
+  assert(tcProposalPlanStatus.isReady === true, 'isReady should be true with TC proposal');
+  assert(tcProposalPlanStatus.pendingCount === 0, 'Pending count should be 0 with TC proposal');
+
+  // Test that TC proposal is NOT included in solver payload (solver should use HOD allocations)
+  const solverTestAlloc = [
+    ...fullyAllocatedAllocs,
+    tcProposalAlloc,
+  ];
+  const solverTestRows = deriveAutomaticCourseRows({
+    courses: sampleSemVCourses,
+    allCatalogCourses: sampleSemVCourses,
+    hodAllocations: solverTestAlloc,
+    academicContextId: 'ctx_3_a',
+    targetCurriculumSemester: 'Semester V',
+    electiveSlotMap: {},
+  });
+  // Only 6 courses total, 5 HOD allocations + 1 TC proposal (TC proposal should NOT be in solver payload)
+  const solverPayload = solverTestRows
+    .filter((r) => r.facultyId && r.courseCode)
+    .map((r) => ({
+      courseCode: r.courseCode,
+      facultyId: r.facultyId,
+      type: r.type === 'LAB' ? 'LAB' : 'THEORY',
+      requiredPeriods: Number(r.requiredPeriods) || 3,
+    }));
+  // TC proposal should not be included since TC proposals are not solver-ready
+  assert(solverPayload.length === 5, 'Solver payload should exclude TC proposals');
+  assert(!solverPayload.some((p) => p.courseCode === '22MAN8R'), 'TC proposal course should not be in solver payload');
+
+  // Additional test: TC proposal should NOT create conflict with HOD allocation
+  const conflictTestAlloc = [
+    ...fullyAllocatedAllocs,
+    {
+      _id: 'hod_001',
+      academicContextId: 'ctx_3_a',
+      courseCode: '22CSC14',
+      facultyId: 'FWL-04',
+      facultyName: 'Dr. A. Manchula',
+      status: 'APPROVED',
+      assignedBy: 'HOD',
+      allocationType: 'THEORY',
+      courseId: 'hod_001',
+    },
+    tcProposalAlloc,
+  ];
+  const conflictRows = deriveAutomaticCourseRows({
+    courses: sampleSemVCourses,
+    allCatalogCourses: sampleSemVCourses,
+    hodAllocations: conflictTestAlloc,
+    academicContextId: 'ctx_3_a',
+    targetCurriculumSemester: 'Semester V',
+    electiveSlotMap: {},
+  });
+  const conflictPlanStatus = calculateAssignmentPlanStatus(conflictRows, { hasContext: true });
+  // Should still be READY since HOD allocation takes precedence
+  assert(conflictPlanStatus.state === 'READY', 'HOD allocation should take precedence over TC proposal');
+
   // --- 18. Solver API Payload Construction Tests ---
   console.log('\n--- 18. Solver API Payload Construction Tests ---');
   const assignmentPlanPayload = fullyAllocatedRows

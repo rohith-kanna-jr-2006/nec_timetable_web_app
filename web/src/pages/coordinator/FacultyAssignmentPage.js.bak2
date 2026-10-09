@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useToast } from '../../context/ToastContext';
-import { getHODAllocations, createHODAllocation, updateHODAllocation } from '../../services/hodAllocationService';
+import { getHODAllocations } from '../../services/hodAllocationService';
 import { getCourses } from '../../services/courseService';
 import { getFacultyList } from '../../services/facultyService';
 import { getAcademicContexts } from '../../services/academicContextService';
@@ -44,11 +44,6 @@ export default function FacultyAssignmentPage() {
   const [facultyList, setFacultyList] = useState([]);
   const [contexts, setContexts] = useState([]);
 
-  // TC Assignment State - Faculty assignments made by TimeTable Coordinator
-  const [tcAssignments, setTcAssignments] = useState({}); // courseCode -> facultyId
-  const [tcAssignmentNames, setTcAssignmentNames] = useState({}); // courseCode -> facultyName
-  const [tcAssignmentLoading, setTcAssignmentLoading] = useState({}); // courseCode -> boolean
-
   // Active Cohort Selection
   const [selectedYear, setSelectedYear] = useState('II Year');
   const [selectedSection, setSelectedSection] = useState('A');
@@ -85,99 +80,6 @@ export default function FacultyAssignmentPage() {
       setError(err.message || 'Unable to retrieve allocation roster.');
     } finally {
       setLoading(false);
-    }
-  };
-
-  // TC Assignment Handlers
-  const handleTcAssignmentChange = (courseCode, facultyId) => {
-    setTcAssignments(prev => ({
-      ...prev,
-      [courseCode]: facultyId || undefined
-    }));
-
-    // Update faculty name for display
-    if (facultyId) {
-      const faculty = facultyList.find(f => f.facultyId === facultyId);
-      if (faculty) {
-        setTcAssignmentNames(prev => ({
-          ...prev,
-          [courseCode]: faculty.facultyName
-        }));
-      }
-    } else {
-      setTcAssignmentNames(prev => ({
-        ...prev,
-        [courseCode]: undefined
-      }));
-    }
-  };
-
-  const handleTcAssignmentSubmit = async (courseCode) => {
-    const facultyId = tcAssignments[courseCode];
-    if (!facultyId) return;
-
-    try {
-      setTcAssignmentLoading(prev => ({
-        ...prev,
-        [courseCode]: true
-      }));
-
-      // Create or update HOD allocation with TC assignment as DRAFT
-      const existingAlloc = allocations.find(a => {
-        const matchCtx = activeContextId
-          ? String(a.academicContextId?._id || a.academicContextId) === String(activeContextId)
-          : a.academicContextId?.year === selectedYear && a.academicContextId?.section === selectedSection;
-        return matchCtx && a.courseCode === courseCode;
-      });
-
-      if (existingAlloc) {
-        // Update existing allocation with TC faculty assignment
-        await updateHODAllocation(existingAlloc._id, {
-          facultyId,
-          facultyName: facultyList.find(f => f.facultyId === facultyId)?.facultyName || '',
-          allocationType: 'THEORY', // Default, will be overridden by policy
-          facultyAssignments: [
-            {
-              facultyId,
-              facultyName: facultyList.find(f => f.facultyId === facultyId)?.facultyName || '',
-              role: 'THEORY',
-              source: 'TC_PROPOSAL'
-            }
-          ]
-        });
-      } else {
-        // Create new allocation with TC proposal
-        await createHODAllocation({
-          academicContextId: activeContextId,
-          courseCode,
-          courseName: filteredCourses.find(c => c.courseCode === courseCode)?.courseName || '',
-          facultyId,
-          facultyName: facultyList.find(f => f.facultyId === facultyId)?.facultyName || '',
-          allocationType: 'THEORY',
-          facultyAssignments: [
-            {
-              facultyId,
-              facultyName: facultyList.find(f => f.facultyId === facultyId)?.facultyName || '',
-              role: 'THEORY',
-              source: 'TC_PROPOSAL'
-            }
-          ],
-          status: 'DRAFT' // TC proposals start as DRAFT
-        });
-      }
-
-      // Refresh data to show the update
-      await loadData();
-
-      showToast(`TC assignment submitted for ${courseCode}`, 'success');
-    } catch (err) {
-      console.error('[FacultyAssignmentPage] TC assignment failed:', err);
-      showToast('Failed to submit TC assignment. Please try again.', 'error');
-    } finally {
-      setTcAssignmentLoading(prev => ({
-        ...prev,
-        [courseCode]: false
-      }));
     }
   };
 
@@ -503,46 +405,8 @@ export default function FacultyAssignmentPage() {
                             </div>
                           </div>
                         ) : (
-                          <div style={{ position: 'relative' }}>
-                            {/* TC Assignment Controls */}
-                            <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', alignItems: 'center' }}>
-                              <select
-                                value={tcAssignments[row.courseCode] || ''}
-                                onChange={(e) => handleTcAssignmentChange(row.courseCode, e.target.value)}
-                                style={{
-                                  padding: '4px 8px',
-                                  borderRadius: 'var(--radius-sm)',
-                                  border: '1px solid var(--color-outline-variant)',
-                                  backgroundColor: 'var(--color-surface)',
-                                  fontSize: '0.75rem',
-                                  minWidth: '120px'
-                                }}
-                              >
-                                <option value="">-- Select Faculty --</option>
-                                {facultyList.map(fac => (
-                                  <option key={fac.facultyId} value={fac.facultyId}>
-                                    {fac.facultyName} ({fac.facultyId})
-                                  </option>
-                                ))}
-                              </select>
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={() => handleTcAssignmentSubmit(row.courseCode)}
-                                disabled={!tcAssignments[row.courseCode]}
-                              >
-                                Assign
-                              </Button>
-                            </div>
-                            {/* Status Indicator */}
-                            {tcAssignments[row.courseCode] && (
-                              <div style={{ marginTop: '4px', fontSize: '0.75rem', color: 'var(--color-success)' }}>
-                                TC Assigned: {tcAssignmentNames[row.courseCode] || 'Loading...'}
-                              </div>
-                            )}
-                            {!tcAssignments[row.courseCode] && (
-                              <Badge variant="warning">HOD Faculty Assignment Required</Badge>
-                            )}
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            <Badge variant="warning">HOD Faculty Assignment Required</Badge>
                           </div>
                         )}
                       </td>

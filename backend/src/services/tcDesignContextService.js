@@ -72,7 +72,7 @@ function resolveRequiredPeriods(course) {
 
 /**
  * Builds the authoritative facultyAssignments array for a course from its
- * HOD allocation, enriched with Faculty document data from the batch-loaded
+ * allocation (HOD or TC proposal), enriched with Faculty document data from the batch-loaded
  * faculty map.
  *
  * @param {Object}  allocation  - HODFacultyAllocation document (lean)
@@ -257,10 +257,13 @@ async function getTCTimetableDesignContext(academicContextId) {
     category: { $nin: ['PEC', 'OEC'] },
   }).sort({ courseCode: 1 }).lean();
 
-  // ---- 4. Batch-load HOD Allocations for this context (1 query) ----
+  // ---- 4. Batch-load HOD Allocations and TC Proposals for this context (1 query) ----
   const allAllocations = await HODFacultyAllocation.find({
     academicContextId: context._id,
-    status: { $ne: 'REJECTED' },
+    $or: [
+      { status: { $ne: 'REJECTED' } }, // HOD allocations (any non-rejected status)
+      { status: 'DRAFT', assignedBy: 'TC' } // TC proposals
+    ]
   }).lean();
 
   // Build allocation lookup by courseCode

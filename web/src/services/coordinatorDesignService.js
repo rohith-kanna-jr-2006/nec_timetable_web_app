@@ -93,11 +93,12 @@ export function normalizeContextId(ctx) {
 }
 
 /**
- * Resolves authoritative HOD faculty allocation for a given course in an academic context.
- * Strict Rule: Never use workload master, candidate pools, or historical fallbacks.
+ * Resolves authoritative faculty allocation for a given course in an academic context.
+ * For TC use: Considers both HOD-approved allocations and TC proposals (DRAFT status).
+ * For HOD use: Only considers HOD-approved allocations.
  * Match order: 1. course/allocation ID, 2. courseCode.
  */
-export function resolveAuthoritativeHODFaculty(allocations = [], academicContextId, courseIdentifier) {
+export function resolveAuthoritativeHODFaculty(allocations = [], academicContextId, courseIdentifier, useTcProposals = false) {
   if (!academicContextId || !courseIdentifier || !Array.isArray(allocations)) {
     return {
       allocated: false,
@@ -118,12 +119,34 @@ export function resolveAuthoritativeHODFaculty(allocations = [], academicContext
     ? String(courseIdentifier._id || courseIdentifier.id || '')
     : '';
 
-  const matchingAllocations = allocations.filter((a) => {
+  // Filter allocations based on usage context
+  // For TC design context: include HOD allocations (any status except REJECTED) and TC proposals (DRAFT status)
+  // For HOD approval context: only include HOD allocations with status APPROVED
+  const filteredAllocations = allocations.filter((a) => {
+    // Skip rejected allocations
     if (a.status === 'REJECTED') return false;
 
+    // Must match academic context
     const aCtxId = normalizeContextId(a.academicContextId);
     if (aCtxId && targetCtxId && aCtxId !== targetCtxId) return false;
 
+    // For TC use: include HOD allocations (any non-rejected status) and TC proposals (DRAFT with assignedBy TC)
+    // For HOD use: only include HOD allocations with APPROVED status
+    // Backward compatibility: treat missing assignedBy as 'HOD' for existing test data
+    const assignedBy = a.assignedBy || 'HOD';
+    if (useTcProposals) {
+      // TC can see: HOD allocations (any status except REJECTED) OR TC proposals (DRAFT status with assignedBy TC)
+      const isHodAllocation = assignedBy === 'HOD' || assignedBy === 'ADMIN';
+      const isTcProposal = a.status === 'DRAFT' && assignedBy === 'TC';
+      return isHodAllocation || isTcProposal;
+    } else {
+      // HOD approval context: only HOD/ADMIN allocations with APPROVED status
+      return (assignedBy === 'HOD' || assignedBy === 'ADMIN') && a.status === 'APPROVED';
+    }
+  });
+
+  // Match by course ID or course code
+  const matchingAllocations = filteredAllocations.filter((a) => {
     // 1. Match by Course ID if both present
     if (targetCourseId && a.courseId && String(a.courseId) === targetCourseId) {
       return true;
@@ -146,14 +169,30 @@ export function resolveAuthoritativeHODFaculty(allocations = [], academicContext
     };
   }
 
-  // Conflict state: multiple active non-rejected HOD allocations for the same course in same cohort
+  // Conflict state: multiple active allocations for the same course in same cohort
   if (matchingAllocations.length > 1) {
+    // Check if conflict is between HOD and TC allocations
+    const hasHodAlloc = matchingAllocations.some(a => a.assignedBy === 'HOD' || a.assignedBy === 'ADMIN');
+    const hasTcAlloc = matchingAllocations.some(a => a.assignedBy === 'TC' && a.status === 'DRAFT');
+
+    if (hasHodAlloc && hasTcAlloc) {
+      return {
+        allocated: false,
+        hasConflict: true,
+        facultyId: null,
+        facultyName: null,
+        displayFaculty: '[CONFLICT: HOD VS TC ALLOCATION]',
+        allocationType: null,
+        status: 'HOD_TC_CONFLICT',
+      };
+    }
+
     return {
       allocated: false,
       hasConflict: true,
       facultyId: null,
       facultyName: null,
-      displayFaculty: '[CONFLICT: MULTIPLE HOD ALLOCATIONS]',
+      displayFaculty: '[CONFLICT: MULTIPLE ALLOCATIONS]',
       allocationType: null,
       status: 'HOD_ALLOCATION_CONFLICT',
     };
@@ -164,14 +203,32 @@ export function resolveAuthoritativeHODFaculty(allocations = [], academicContext
   const facultyId = alloc.facultyId?._id || alloc.facultyId || null;
   const facultyName = alloc.facultyName || facultyId;
 
+  // Determine display status based on allocation type
+  let displayStatus = 'HOD ALLOCATED';
+  let displayFaculty = facultyName ? `${facultyName} (${facultyId})` : facultyId;
+
+  if (alloc.assignedBy === 'TC' && alloc.status === 'DRAFT') {
+    displayStatus = 'TC PROPOSAL';
+    displayFaculty = `${facultyName || facultyId} (TC Proposal)`;
+  } else if (alloc.assignedBy === 'HOD' || alloc.assignedBy === 'ADMIN') {
+    if (alloc.status === 'APPROVED') {
+      displayStatus = 'HOD ALLOCATED';
+      displayFaculty = facultyName ? `${facultyName} (${facultyId})` : facultyId;
+    } else if (alloc.status === 'DRAFT' || alloc.status === 'SUBMITTED') {
+      displayStatus = 'HOD DRAFT';
+      displayFaculty = facultyName ? `${facultyName} (${facultyId})` : facultyId;
+    }
+  }
+
   return {
     allocated: true,
     hasConflict: false,
     facultyId,
     facultyName,
-    displayFaculty: facultyName ? `${facultyName} (${facultyId})` : facultyId,
+    displayFaculty,
+    displayStatus,
     allocationType: alloc.allocationType || 'THEORY',
-    status: 'HOD ALLOCATED',
+    status: displayStatus,
   };
 }
 
@@ -216,7 +273,8 @@ export function deriveAutomaticCourseRows({
     const facultyResolution = resolveAuthoritativeHODFaculty(
       hodAllocations,
       academicContextId,
-      code
+      code,
+      true // Use TC proposals for coordinator design context
     );
 
     const calculatedPeriods =
@@ -394,13 +452,18 @@ export function calculateAssignmentPlanStatus(rows = [], { hasContext = true, lo
   const totalCourses = rows.length;
   const theoryCount = rows.filter((r) => r.type === 'THEORY' || !r.type?.includes('LAB')).length;
   const labCount = rows.filter((r) => r.type === 'LAB' || r.type?.includes('LAB')).length;
-  const allocatedCount = rows.filter((r) => r.isAllocated && r.status === 'HOD ALLOCATED').length;
+  // Count as allocated if HOD-approved OR TC proposal exists
+  // Note: TC proposals are counted toward readiness determination per requirements
+  const allocatedCount = rows.filter((r) =>
+    r.isAllocated &&
+    (r.status === 'HOD ALLOCATED' || r.status === 'TC PROPOSAL')
+  ).length;
   const pendingCount = totalCourses - allocatedCount;
 
   if (pendingCount > 0) {
     return {
       state: 'PARTIAL',
-      userMessage: 'Faculty allocation is pending HOD decision for one or more courses.',
+      userMessage: 'Faculty allocation is pending HOD decision or TC assignment for one or more courses.',
       totalCourses,
       theoryCount,
       labCount,
@@ -412,7 +475,7 @@ export function calculateAssignmentPlanStatus(rows = [], { hasContext = true, lo
 
   return {
     state: 'READY',
-    userMessage: 'All course-faculty assignments are verified from authoritative HOD allocations. Ready for timetable generation.',
+    userMessage: 'All course-faculty assignments are verified. Ready for timetable generation.',
     totalCourses,
     theoryCount,
     labCount,

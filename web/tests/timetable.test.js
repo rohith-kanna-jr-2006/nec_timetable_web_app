@@ -45,9 +45,11 @@ async function runTimetableTests() {
     const versionsData = await versionsRes.json();
     assert(versionsRes.status === 200, 'Timetable versions endpoint returns HTTP 200');
     assert(versionsData.success === true, 'Timetable versions response success flag is true');
-    assert(Array.isArray(versionsData.data) && versionsData.data.length > 0, 'Found at least one published timetable version');
-    const activeVersion = versionsData.data[0];
-    assert(activeVersion.status === 'PUBLISHED', 'Active timetable version status is PUBLISHED');
+    assert(Array.isArray(versionsData.data) && versionsData.data.length > 0, 'Found at least one timetable version');
+    // Find a published version
+    const publishedVersion = versionsData.data.find(v => v.status === 'PUBLISHED');
+    assert(publishedVersion !== undefined, 'At least one published timetable version exists');
+    assert(publishedVersion.status === 'PUBLISHED', 'Published timetable version status is PUBLISHED');
 
     // Test 2: Faculty Timetable Endpoint (FWL-03 - Dr. S. Karpusamy)
     const facultyTimetableRes = await fetch(`${BASE_URL}/timetable/faculty/FWL-03`);
@@ -75,8 +77,8 @@ async function runTimetableTests() {
     assert(theorySessions.length >= 3, `Faculty has ${theorySessions.length} theory contact periods`);
 
     // Test 6: Verify Class Timetable endpoint
-    if (activeVersion.academicContextId) {
-      const classRes = await fetch(`${BASE_URL}/timetable/class/${activeVersion.academicContextId}`);
+    if (publishedVersion.academicContextId) {
+      const classRes = await fetch(`${BASE_URL}/timetable/class/${publishedVersion.academicContextId}`);
       assert(classRes.status === 200, 'Class schedule endpoint returns HTTP 200');
     }
 

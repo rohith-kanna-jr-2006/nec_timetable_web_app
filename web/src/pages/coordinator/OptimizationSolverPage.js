@@ -4,7 +4,7 @@ import { useToast } from '../../context/ToastContext';
 import { getAcademicContexts } from '../../services/academicContextService';
 import { getCourses } from '../../services/courseService';
 import { getHODAllocations, validateCohortAllocations, transitionTimetableVersion } from '../../services/hodAllocationService';
-import { generateFromContext, getDesignContext, getContextStatus } from '../../services/timetableService';
+import { generateFromContext, getDesignContext, getContextStatus, getVersionById, getClassAdvisors } from '../../services/timetableService';
 import { describeError } from '../../services/api';
 import {
   RELEVANT_YEARS,
@@ -196,7 +196,7 @@ export default function OptimizationSolverPage() {
   const courseFacultyMap = useMemo(() => {
     const map = {};
     for (const row of courseRows) {
-      map[row.courseCode] = resolveCourseFacultyDisplay(hodAllocations, activeContextId, row.courseCode);
+      map[row.courseCode] = resolveCourseFacultyDisplay(hodAllocations, activeContextId, row.courseCode, true); // Use TC proposals for coordinator design
     }
     return map;
   }, [courseRows, hodAllocations, activeContextId]);
